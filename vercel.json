@@ -1,9 +1,15 @@
 {
   "version": 2,
   "builds": [
-    { "src": "api/tiles.js", "use": "@vercel/node" }
+    {
+      "src": "api/tiles/[...params].js",
+      "use": "@vercel/node"
+    }
   ],
   "routes": [
-    { "src": "/tiles", "dest": "api/tiles.js" }
+    {
+      "src": "/api/tiles/(.*)",
+      "dest": "api/tiles/[...params].js"
+    }
   ]
 }
