@@ -1,5 +1,4 @@
-const ee = require('@google/earthengine');
-const { createServer } = require('http');
+import ee from '@google/earthengine';
 
 const SERVICE_ACCOUNT = JSON.parse(process.env.GEE_SERVICE_ACCOUNT);
 const API_KEY = process.env.API_KEY;
@@ -12,7 +11,7 @@ const initializeEarthEngine = () => {
   });
 };
 
-module.exports = async (req, res) => {
+export default async (req, res) => {
   const { query } = req;
   const {
     year = "2024",
@@ -64,4 +63,4 @@ module.exports = async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-};
+}; 
