@@ -1,6 +1,7 @@
 import ee from '@google/earthengine';
 
-const SERVICE_ACCOUNT = JSON.parse(process.env.GEE_SERVICE_ACCOUNT);
+// Check if environment variables are loaded
+const SERVICE_ACCOUNT = process.env.GEE_SERVICE_ACCOUNT ? JSON.parse(process.env.GEE_SERVICE_ACCOUNT) : null;
 const API_KEY = process.env.API_KEY;
 
 const initializeEarthEngine = () => {
@@ -12,6 +13,17 @@ const initializeEarthEngine = () => {
 };
 
 export default async (req, res) => {
+  // Add CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Handle OPTIONS request for CORS
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
   const { query } = req;
   const {
     year = "2024",
@@ -21,6 +33,17 @@ export default async (req, res) => {
     opacity = "1.0",
     apikey,
   } = query;
+
+  // Check if environment variables are set
+  if (!SERVICE_ACCOUNT) {
+    res.status(500).json({ error: "GEE_SERVICE_ACCOUNT environment variable not set" });
+    return;
+  }
+
+  if (!API_KEY) {
+    res.status(500).json({ error: "API_KEY environment variable not set" });
+    return;
+  }
 
   if (apikey !== API_KEY) {
     res.status(403).json({ error: "Invalid API key" });
