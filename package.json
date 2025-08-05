@@ -1,0 +1,14 @@
+{
+  "name": "gee-tile-server",
+  "version": "1.0.0",
+  "description": "GEE tile server on Vercel",
+  "type": "module",
+  "main": "api/tiles/[...params].js",
+  "scripts": {
+    "start": "node api/tiles/[...params].js"
+  },
+  "dependencies": {
+    "@google/earthengine": "^0.1.300",
+    "google-auth-library": "^9.0.0"
+  }
+}
