@@ -1,11 +1,24 @@
 import ee from '@google/earthengine';
 
 // Check if environment variables are loaded
-const SERVICE_ACCOUNT = process.env.GEE_SERVICE_ACCOUNT ? JSON.parse(process.env.GEE_SERVICE_ACCOUNT) : null;
-const API_KEY = process.env.API_KEY;
+let SERVICE_ACCOUNT = null;
+let API_KEY = process.env.API_KEY;
+
+try {
+  if (process.env.GEE_SERVICE_ACCOUNT) {
+    SERVICE_ACCOUNT = JSON.parse(process.env.GEE_SERVICE_ACCOUNT);
+  }
+} catch (error) {
+  console.error('Error parsing GEE_SERVICE_ACCOUNT:', error.message);
+}
 
 const initializeEarthEngine = () => {
   return new Promise((resolve, reject) => {
+    if (!SERVICE_ACCOUNT) {
+      reject(new Error('GEE_SERVICE_ACCOUNT not properly configured'));
+      return;
+    }
+    
     ee.data.authenticateViaPrivateKey(SERVICE_ACCOUNT, () => {
       ee.initialize(null, null, resolve, reject);
     }, reject);
@@ -36,7 +49,10 @@ export default async (req, res) => {
 
   // Check if environment variables are set
   if (!SERVICE_ACCOUNT) {
-    res.status(500).json({ error: "GEE_SERVICE_ACCOUNT environment variable not set" });
+    res.status(500).json({ 
+      error: "GEE_SERVICE_ACCOUNT environment variable not set or invalid JSON",
+      hint: "Make sure to set the entire JSON as a single line in Vercel environment variables"
+    });
     return;
   }
 
