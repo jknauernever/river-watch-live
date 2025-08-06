@@ -181,8 +181,11 @@ export default async (req, res) => {
       });
     });
 
+    // Return a custom URL that points back to the Supabase function
+    const customTileUrl = `https://sereallctpcqrdjmvwrs.supabase.co/functions/v1/get-gee-tiles?dataset=${dataset}&year=${year}&month=${month}&z={z}&x={x}&y={y}`;
+
     res.json({ 
-      tile_url: mapId.urlFormat,
+      tile_url: customTileUrl,  // This is now our custom URL!
       dataset: dataset,
       description: datasetConfig.description,
       parameters: {
@@ -196,4 +199,4 @@ export default async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-}; 
+};
