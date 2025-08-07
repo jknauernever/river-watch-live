@@ -180,12 +180,13 @@ export default async (req, res) => {
       // Get the latest date from the collection
       const latestDate = await new Promise((resolve, reject) => {
         collection.aggregate_array('system:time_start')
-          .sort()
-          .reverse()
-          .limit(1)
           .evaluate((dates, err) => {
             if (err) reject(err);
-            else resolve(dates[0]);
+            else {
+              // Sort dates in JavaScript and get the latest
+              const sortedDates = dates.sort((a, b) => b - a);
+              resolve(sortedDates[0]);
+            }
           });
       });
       
