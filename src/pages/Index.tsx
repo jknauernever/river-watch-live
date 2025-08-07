@@ -10,6 +10,11 @@ const Index = () => {
     const stored = localStorage.getItem('google-maps-api-key');
     if (stored) {
       setApiKey(stored);
+    } else {
+      // Set default API key if none exists
+      const defaultKey = 'AIzaSyD3jjY3_Ck3ETbUk9al0uvh5Z-XU5P08vc';
+      localStorage.setItem('google-maps-api-key', defaultKey);
+      setApiKey(defaultKey);
     }
   }, []);
 
