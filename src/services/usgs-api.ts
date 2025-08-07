@@ -47,9 +47,23 @@ export class USGSService {
 
     const requestPromise = (async () => {
       try {
-        // Due to rate limiting, immediately return demo data for now
-        console.log('USGS API temporarily unavailable due to rate limits. Using demo data.');
-        return this.generateDemoLocations(bbox);
+        const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+        url.searchParams.set('bbox', bbox.join(','));
+        url.searchParams.set('f', 'json');
+        url.searchParams.set('limit', '500');
+        url.searchParams.set('apikey', USGS_API_KEY);
+
+        const response = await fetch(url.toString());
+        if (!response.ok) {
+          console.warn(`USGS API returned ${response.status}, falling back to demo data`);
+          return this.generateDemoLocations(bbox);
+        }
+
+        const data = await response.json();
+        const locations = data.features || [];
+        this.setCache(cacheKey, locations);
+        console.log(`Successfully fetched ${locations.length} monitoring locations from USGS API`);
+        return locations;
       } catch (error) {
         console.error('Error fetching monitoring locations:', error);
         // Fallback to demo data if API fails
