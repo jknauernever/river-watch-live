@@ -1,6 +1,7 @@
 import { USGSMonitoringLocation, USGSLatestValue, GaugeStation, WaterLevel, USGSHistoricalData } from '@/types/usgs';
 
 const USGS_BASE_URL = 'https://api.waterdata.usgs.gov/ogcapi/v0';
+const USGS_API_KEY = 'dWeC1OcaE272BTLdocXksg71zSMyR70ZkL0VUcJJ';
 
 // Calculate water level based on gage height value
 function calculateWaterLevel(value: number): WaterLevel {
@@ -45,6 +46,7 @@ export class USGSService {
       url.searchParams.set('bbox', `${minLng},${minLat},${maxLng},${maxLat}`);
       url.searchParams.set('f', 'json');
       url.searchParams.set('limit', '200'); // Reduced limit to avoid rate limiting
+      url.searchParams.set('apikey', USGS_API_KEY);
       
       console.log('Fetching USGS monitoring locations (locations only):', url.toString());
 
@@ -150,6 +152,7 @@ export class USGSService {
       
       url.searchParams.set('monitoring_location_id', siteId);
       url.searchParams.set('f', 'json');
+      url.searchParams.set('apikey', USGS_API_KEY);
 
       const response = await fetch(url.toString());
       if (!response.ok) {
@@ -248,6 +251,7 @@ export class USGSService {
       url.searchParams.set('end', endDate);
       url.searchParams.set('f', 'json');
       url.searchParams.set('limit', '1000');
+      url.searchParams.set('apikey', USGS_API_KEY);
 
       const response = await fetch(url.toString());
       if (!response.ok) {
