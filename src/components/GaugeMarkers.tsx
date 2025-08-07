@@ -45,11 +45,11 @@ export const GaugeMarkers = ({
       title: location.name,
       icon: {
         path: google.maps.SymbolPath.CIRCLE,
-        scale: 6,
-        fillColor: '#8e8e93',
-        fillOpacity: 0.7,
+        scale: 10,
+        fillColor: '#1e90ff',
+        fillOpacity: 0.8,
         strokeColor: '#ffffff',
-        strokeWeight: 1,
+        strokeWeight: 2,
       },
     });
 
