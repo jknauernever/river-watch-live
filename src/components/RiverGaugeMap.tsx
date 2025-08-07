@@ -244,8 +244,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       console.log('Creating map instance...');
       
       const map = new google.maps.Map(mapRef.current, {
-        zoom: 6,
-        center: { lat: 39.8283, lng: -98.5795 }, // Center of US
+        zoom: 9,
+        center: { lat: 47.6062, lng: -122.3321 }, // Puget Sound, Washington
         mapTypeId: 'terrain',
         styles: [
           {
@@ -304,8 +304,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
   const resetView = useCallback(() => {
     if (mapInstanceRef.current) {
-      mapInstanceRef.current.setCenter({ lat: 39.8283, lng: -98.5795 });
-      mapInstanceRef.current.setZoom(6);
+      mapInstanceRef.current.setCenter({ lat: 47.6062, lng: -122.3321 });
+      mapInstanceRef.current.setZoom(9);
     }
   }, []);
 
