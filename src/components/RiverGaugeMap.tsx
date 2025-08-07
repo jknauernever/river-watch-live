@@ -290,16 +290,16 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         clearTimeout(timeoutId);
         timeoutId = setTimeout(() => {
           const currentBounds = map.getBounds();
-          if (!currentBounds) return;
+          if (!currentBounds || isLoading) return;
           
-          const boundsKey = `${currentBounds.getNorthEast().toString()}-${currentBounds.getSouthWest().toString()}`;
+          const boundsKey = `${currentBounds.getNorthEast().lat().toFixed(3)}-${currentBounds.getSouthWest().lat().toFixed(3)}`;
           
-          // Skip if same bounds or already loading
-          if (boundsKey === lastBounds || isLoading) return;
+          // Skip if same bounds 
+          if (boundsKey === lastBounds) return;
           
           lastBounds = boundsKey;
           loadGaugeLocations(map);
-        }, 3000); // Increased to 3 seconds to prevent excessive calls
+        }, 5000); // Increased to 5 seconds to prevent excessive calls
       });
 
     } catch (error) {
@@ -350,8 +350,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   }, [loadStations, basicGaugeLocations, createBasicMarker]);
 
   useEffect(() => {
-    initializeMap();
-  }, [initializeMap]);
+    if (apiKey && !mapInstanceRef.current) {
+      initializeMap();
+    }
+  }, [apiKey, initializeMap]);
 
   return (
     <div className="relative w-full h-screen bg-background">

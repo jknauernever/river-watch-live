@@ -145,8 +145,8 @@ export class USGSService {
     
     // Filter for surface water sites and return basic info only
     const surfaceWaterSites = locations.filter((location: any) => {
-      const siteType = location.properties?.site_type_code;
-      return siteType === 'ST' || siteType === 'LK' || siteType === 'ES'; // Stream, Lake, Estuary
+      const siteType = location.properties?.site_type_cd || location.properties?.site_type_code;
+      return siteType === 'ST' || siteType === 'LK' || siteType === 'ES' || !siteType; // Include sites without type codes
     });
 
     return surfaceWaterSites.map((location: any) => ({
