@@ -160,6 +160,9 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     const bounds = map.getBounds();
     if (!bounds) return;
 
+    // Prevent multiple simultaneous calls
+    if (isLoading) return;
+
     const ne = bounds.getNorthEast();
     const sw = bounds.getSouthWest();
     const bbox: [number, number, number, number] = [
@@ -185,10 +188,13 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     } finally {
       setIsLoading(false);
     }
-  }, [createBasicMarker]);
+  }, [createBasicMarker, isLoading]);
 
   const loadStations = useCallback(async (map: any) => {
     if (!showRiverData || basicGaugeLocations.length === 0) return;
+    
+    // Prevent multiple simultaneous calls
+    if (isLoadingData) return;
     
     setIsLoadingData(true);
     try {
@@ -217,7 +223,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     } finally {
       setIsLoadingData(false);
     }
-  }, [createMarker, toast, showRiverData, basicGaugeLocations]);
+  }, [createMarker, toast, showRiverData, basicGaugeLocations, isLoadingData]);
 
   const initializeMap = useCallback(async () => {
     try {
@@ -272,14 +278,18 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
       // Load initial gauge locations (not water data yet)
       google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
-        loadGaugeLocations(map);
+        setTimeout(() => loadGaugeLocations(map), 500); // Small delay to ensure map is ready
       });
 
-      // Reload locations when map moves (with debouncing)
+      // Reload locations when map moves (with longer debouncing to prevent flashing)
       let timeoutId: NodeJS.Timeout;
       map.addListener('bounds_changed', () => {
         clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => loadGaugeLocations(map), 1000);
+        timeoutId = setTimeout(() => {
+          if (!isLoading) { // Only load if not already loading
+            loadGaugeLocations(map);
+          }
+        }, 2000); // Increased to 2 seconds to reduce flashing
       });
 
     } catch (error) {
@@ -364,8 +374,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </Button>
       </div>
 
-      {/* Loading indicators */}
-      {isLoading && (
+      {/* Loading indicators - only show one at a time */}
+      {isLoading && !isLoadingData && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
           <Card>
             <CardContent className="p-3 flex items-center gap-2">
