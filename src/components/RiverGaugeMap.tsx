@@ -185,18 +185,11 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       console.log(`Loaded ${locations.length} gauge locations`);
     } catch (error) {
       console.error('Error loading gauge locations:', error);
-      // Handle rate limiting gracefully - don't show toast for rate limit errors
-      if (error instanceof Error && !error.message.includes('rate limit')) {
-        toast({
-          title: "Loading Error",
-          description: "Failed to load gauge locations. Please try again.",
-          variant: "destructive",
-        });
-      }
+      // Handle rate limiting gracefully - don't show any error notifications
     } finally {
       setIsLoading(false);
     }
-  }, [createBasicMarker, isLoading, toast]);
+  }, [createBasicMarker, toast]);
 
   const loadStations = useCallback(async (map: any) => {
     if (!showRiverData || basicGaugeLocations.length === 0) return;
@@ -289,15 +282,24 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         setTimeout(() => loadGaugeLocations(map), 500); // Small delay to ensure map is ready
       });
 
-      // Reload locations when map moves (with longer debouncing to prevent flashing)
+      // Reload locations when map moves - use longer debounce and track if already processed
       let timeoutId: NodeJS.Timeout;
+      let lastBounds: string | null = null;
+      
       map.addListener('bounds_changed', () => {
         clearTimeout(timeoutId);
         timeoutId = setTimeout(() => {
-          if (!isLoading) { // Only load if not already loading
-            loadGaugeLocations(map);
-          }
-        }, 2000); // Increased to 2 seconds to reduce flashing
+          const currentBounds = map.getBounds();
+          if (!currentBounds) return;
+          
+          const boundsKey = `${currentBounds.getNorthEast().toString()}-${currentBounds.getSouthWest().toString()}`;
+          
+          // Skip if same bounds or already loading
+          if (boundsKey === lastBounds || isLoading) return;
+          
+          lastBounds = boundsKey;
+          loadGaugeLocations(map);
+        }, 3000); // Increased to 3 seconds to prevent excessive calls
       });
 
     } catch (error) {
@@ -382,18 +384,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </Button>
       </div>
 
-      {/* Loading indicators - only show one at a time */}
-      {isLoading && !isLoadingData && (
-        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
-          <Card>
-            <CardContent className="p-3 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-sm">Loading gauge locations...</span>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
+      {/* Loading indicator - only show for water data loading */}
       {isLoadingData && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
           <Card>
