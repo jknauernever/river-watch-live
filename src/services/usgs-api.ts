@@ -41,12 +41,12 @@ export class USGSService {
       const [minLng, minLat, maxLng, maxLat] = bbox;
       const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
       
-      // Only use valid parameters that the API supports
+      // Only get basic location data - no water measurements yet
       url.searchParams.set('bbox', `${minLng},${minLat},${maxLng},${maxLat}`);
       url.searchParams.set('f', 'json');
-      url.searchParams.set('limit', '1000'); // Allow more results
+      url.searchParams.set('limit', '1000');
       
-      console.log('Fetching USGS monitoring locations:', url.toString());
+      console.log('Fetching USGS monitoring locations (locations only):', url.toString());
 
       const response = await fetch(url.toString());
       if (!response.ok) {
@@ -58,7 +58,7 @@ export class USGSService {
       const data = await response.json();
       const locations = data.features || [];
       
-      console.log(`Found ${locations.length} monitoring locations`);
+      console.log(`Found ${locations.length} total monitoring locations`);
       
       this.setCache(cacheKey, locations);
       return locations;
@@ -66,6 +66,30 @@ export class USGSService {
       console.error('Error fetching monitoring locations:', error);
       return [];
     }
+  }
+
+  async getGaugeLocationsOnly(bbox: [number, number, number, number]): Promise<{ 
+    id: string; 
+    name: string; 
+    siteId: string; 
+    coordinates: [number, number];
+    siteType: string;
+  }[]> {
+    const locations = await this.fetchMonitoringLocations(bbox);
+    
+    // Filter for surface water sites and return basic info only
+    const surfaceWaterSites = locations.filter((location: any) => {
+      const siteType = location.properties?.site_type_code;
+      return siteType === 'ST' || siteType === 'LK' || siteType === 'ES'; // Stream, Lake, Estuary
+    });
+
+    return surfaceWaterSites.map((location: any) => ({
+      id: location.id || location.properties.monitoring_location_number,
+      name: location.properties.monitoring_location_name || `Site ${location.properties.monitoring_location_number}`,
+      siteId: location.properties.monitoring_location_number,
+      coordinates: location.geometry.coordinates,
+      siteType: location.properties.site_type_code
+    }));
   }
 
   async fetchLatestValue(siteId: string): Promise<USGSLatestValue | null> {
@@ -103,36 +127,32 @@ export class USGSService {
     }
   }
 
-  async processGaugeStations(bbox: [number, number, number, number]): Promise<GaugeStation[]> {
-    const locations = await this.fetchMonitoringLocations(bbox);
+  async enhanceGaugeStationsWithData(basicStations: { 
+    id: string; 
+    name: string; 
+    siteId: string; 
+    coordinates: [number, number];
+    siteType: string;
+  }[]): Promise<GaugeStation[]> {
     const stations: GaugeStation[] = [];
 
-    console.log(`Processing ${locations.length} monitoring locations`);
+    console.log(`Enhancing ${basicStations.length} gauge stations with water data`);
 
-    // Filter for surface water sites (streams, rivers, etc.)
-    const surfaceWaterSites = locations.filter((location: any) => {
-      const siteType = location.properties?.site_type_code;
-      return siteType === 'ST' || siteType === 'LK' || siteType === 'ES'; // Stream, Lake, Estuary
-    });
-
-    console.log(`Found ${surfaceWaterSites.length} surface water sites`);
-
-    // Process all surface water sites in batches
-    const batchSize = 8; // Reasonable batch size for API calls
-    for (let i = 0; i < surfaceWaterSites.length; i += batchSize) {
-      const batch = surfaceWaterSites.slice(i, i + batchSize);
-      const batchPromises = batch.map(async (location: any) => {
-        const siteId = location.properties.monitoring_location_number;
-        const latestValue = await this.fetchLatestValue(siteId);
+    // Process all stations in batches to get their water data
+    const batchSize = 8;
+    for (let i = 0; i < basicStations.length; i += batchSize) {
+      const batch = basicStations.slice(i, i + batchSize);
+      const batchPromises = batch.map(async (station) => {
+        const latestValue = await this.fetchLatestValue(station.siteId);
         
         const height = latestValue?.properties?.value || Math.random() * 10; // Demo data if no real data
         const waterLevel = calculateWaterLevel(height);
 
         return {
-          id: location.id || siteId,
-          name: location.properties.monitoring_location_name || `Site ${siteId}`,
-          siteId,
-          coordinates: location.geometry.coordinates,
+          id: station.id,
+          name: station.name,
+          siteId: station.siteId,
+          coordinates: station.coordinates,
           latestHeight: height,
           waterLevel,
           lastUpdated: latestValue?.properties?.datetime,
@@ -147,13 +167,19 @@ export class USGSService {
       });
 
       // Small delay between batches to be respectful to the API
-      if (i + batchSize < surfaceWaterSites.length) {
+      if (i + batchSize < basicStations.length) {
         await new Promise(resolve => setTimeout(resolve, 150));
       }
     }
 
-    console.log(`Successfully processed ${stations.length} gauge stations`);
+    console.log(`Successfully enhanced ${stations.length} gauge stations with water data`);
     return stations;
+  }
+
+  // Legacy method - now uses the two-phase approach
+  async processGaugeStations(bbox: [number, number, number, number]): Promise<GaugeStation[]> {
+    const basicStations = await this.getGaugeLocationsOnly(bbox);
+    return this.enhanceGaugeStationsWithData(basicStations);
   }
 
   async fetchHistoricalData(

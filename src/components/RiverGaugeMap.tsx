@@ -24,9 +24,11 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const markersRef = useRef<any[]>([]);
   const infoWindowRef = useRef<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingData, setIsLoadingData] = useState(false);
   const [stations, setStations] = useState<GaugeStation[]>([]);
+  const [basicGaugeLocations, setBasicGaugeLocations] = useState<any[]>([]);
   const [selectedStation, setSelectedStation] = useState<GaugeStation | null>(null);
-  const [showRiverData, setShowRiverData] = useState(true);
+  const [showRiverData, setShowRiverData] = useState(false); // Start with just locations
   const { toast } = useToast();
 
   const loadGoogleMapsScript = useCallback(() => {
@@ -45,6 +47,50 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       document.head.appendChild(script);
     });
   }, [apiKey]);
+
+  const createBasicMarker = useCallback((location: any, map: any) => {
+    const { google } = window;
+    
+    const marker = new google.maps.Marker({
+      position: { lat: location.coordinates[1], lng: location.coordinates[0] },
+      map: map,
+      title: location.name,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 6,
+        fillColor: '#8e8e93', // Neutral gray
+        fillOpacity: 0.7,
+        strokeColor: '#ffffff',
+        strokeWeight: 1,
+      },
+    });
+
+    marker.addListener('click', () => {
+      const content = `
+        <div class="p-3 max-w-sm">
+          <h3 class="font-semibold text-primary mb-2">${location.name}</h3>
+          <div class="space-y-1 text-sm">
+            <div><strong>Site ID:</strong> ${location.siteId}</div>
+            <div><strong>Type:</strong> ${location.siteType === 'ST' ? 'Stream' : location.siteType === 'LK' ? 'Lake' : 'Estuary'}</div>
+            <div><strong>Coordinates:</strong> ${location.coordinates[1].toFixed(4)}, ${location.coordinates[0].toFixed(4)}</div>
+            <div class="text-muted-foreground text-xs mt-2">Click "Show River Data" to see current water levels</div>
+          </div>
+        </div>
+      `;
+
+      if (infoWindowRef.current) {
+        infoWindowRef.current.close();
+      }
+
+      infoWindowRef.current = new google.maps.InfoWindow({
+        content: content,
+      });
+
+      infoWindowRef.current.open(map, marker);
+    });
+
+    return marker;
+  }, []);
 
   const createMarker = useCallback((station: GaugeStation, map: any) => {
     const { google } = window;
@@ -97,9 +143,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     return marker;
   }, []);
 
-  const loadStations = useCallback(async (map: any) => {
-    if (!showRiverData) return; // Don't load if river data is hidden
-    
+  const loadGaugeLocations = useCallback(async (map: any) => {
     const bounds = map.getBounds();
     if (!bounds) return;
 
@@ -111,32 +155,56 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
     setIsLoading(true);
     try {
-      const newStations = await usgsService.processGaugeStations(bbox);
-      setStations(newStations);
+      const locations = await usgsService.getGaugeLocationsOnly(bbox);
+      setBasicGaugeLocations(locations);
 
       // Clear existing markers
       markersRef.current.forEach(marker => marker.setMap(null));
       markersRef.current = [];
 
-      // Create new markers
-      const newMarkers = newStations.map(station => createMarker(station, map));
+      // Create basic location markers
+      const newMarkers = locations.map(location => createBasicMarker(location, map));
       markersRef.current = newMarkers;
 
-      toast({
-        title: "Gauge Data Loaded",
-        description: `Found ${newStations.length} river gauge stations`,
-      });
+      console.log(`Loaded ${locations.length} gauge locations`);
     } catch (error) {
-      console.error('Error loading stations:', error);
-      toast({
-        title: "Error Loading Data",
-        description: "Failed to load USGS gauge data. Please try again.",
-        variant: "destructive",
-      });
+      console.error('Error loading gauge locations:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [createMarker, toast, showRiverData]);
+  }, [createBasicMarker]);
+
+  const loadStations = useCallback(async (map: any) => {
+    if (!showRiverData || basicGaugeLocations.length === 0) return;
+    
+    setIsLoadingData(true);
+    try {
+      const enhancedStations = await usgsService.enhanceGaugeStationsWithData(basicGaugeLocations);
+      setStations(enhancedStations);
+
+      // Clear existing markers
+      markersRef.current.forEach(marker => marker.setMap(null));
+      markersRef.current = [];
+
+      // Create enhanced markers with water data
+      const newMarkers = enhancedStations.map(station => createMarker(station, map));
+      markersRef.current = newMarkers;
+
+      toast({
+        title: "Water Data Loaded",
+        description: `Enhanced ${enhancedStations.length} gauges with current water levels`,
+      });
+    } catch (error) {
+      console.error('Error loading water data:', error);
+      toast({
+        title: "Error Loading Water Data",
+        description: "Failed to load current water levels. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingData(false);
+    }
+  }, [createMarker, toast, showRiverData, basicGaugeLocations]);
 
   const initializeMap = useCallback(async () => {
     try {
@@ -179,16 +247,16 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         }
       });
 
-      // Load initial data
+      // Load initial gauge locations (not water data yet)
       google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
-        loadStations(map);
+        loadGaugeLocations(map);
       });
 
-      // Reload data when map moves (with debouncing)
+      // Reload locations when map moves (with debouncing)
       let timeoutId: NodeJS.Timeout;
       map.addListener('bounds_changed', () => {
         clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => loadStations(map), 1000);
+        timeoutId = setTimeout(() => loadGaugeLocations(map), 1000);
       });
 
     } catch (error) {
@@ -213,15 +281,22 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       const newValue = !prev;
       
       if (!newValue) {
-        // Hide all markers
-        markersRef.current.forEach(marker => marker.setMap(null));
-        markersRef.current = [];
+        // Switch back to basic location markers
+        if (mapInstanceRef.current && basicGaugeLocations.length > 0) {
+          markersRef.current.forEach(marker => marker.setMap(null));
+          markersRef.current = [];
+          
+          const basicMarkers = basicGaugeLocations.map(location => 
+            createBasicMarker(location, mapInstanceRef.current)
+          );
+          markersRef.current = basicMarkers;
+        }
         setStations([]);
         if (infoWindowRef.current) {
           infoWindowRef.current.close();
         }
       } else {
-        // Reload stations
+        // Load water data for current locations
         if (mapInstanceRef.current) {
           loadStations(mapInstanceRef.current);
         }
@@ -229,7 +304,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       
       return newValue;
     });
-  }, [loadStations]);
+  }, [loadStations, basicGaugeLocations, createBasicMarker]);
 
   useEffect(() => {
     initializeMap();
@@ -254,9 +329,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           onClick={toggleRiverData} 
           variant={showRiverData ? "default" : "outline"} 
           size="sm"
+          disabled={basicGaugeLocations.length === 0}
         >
           <Droplets className="w-4 h-4 mr-2" />
-          {showRiverData ? "Hide" : "Show"} River Data
+          {showRiverData ? "Hide" : "Show"} Water Data
         </Button>
         
         <Button onClick={resetView} variant="secondary" size="sm">
@@ -265,13 +341,24 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </Button>
       </div>
 
-      {/* Loading indicator */}
-      {isLoading && showRiverData && (
+      {/* Loading indicators */}
+      {isLoading && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
           <Card>
             <CardContent className="p-3 flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-sm">Loading gauge data...</span>
+              <span className="text-sm">Loading gauge locations...</span>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {isLoadingData && (
+        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
+          <Card>
+            <CardContent className="p-3 flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="text-sm">Loading water level data...</span>
             </CardContent>
           </Card>
         </div>
@@ -307,11 +394,12 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </Card>
       )}
 
-      {/* Station count */}
-      {stations.length > 0 && showRiverData && (
+      {/* Gauge count - always show when locations are loaded */}
+      {basicGaugeLocations.length > 0 && (
         <div className="absolute bottom-4 right-4 z-10">
           <Badge variant="secondary">
-            {stations.length} gauge{stations.length !== 1 ? 's' : ''} loaded
+            {basicGaugeLocations.length} gauge{basicGaugeLocations.length !== 1 ? 's' : ''} in view
+            {showRiverData && stations.length > 0 && ` • ${stations.length} with data`}
           </Badge>
         </div>
       )}
