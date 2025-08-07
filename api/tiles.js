@@ -286,29 +286,39 @@ export default async (req, res) => {
     
     console.log(`📈 Composite statistics:`, compositeStats);
     
-    // Check if the composite has any non-null values
-    const hasData = Object.values(compositeStats).some(value => value !== null && !isNaN(value));
+    // More lenient validation - check if we have any non-null values OR if the collection has data
+    const hasValidStats = Object.values(compositeStats).some(value => value !== null && !isNaN(value));
+    const hasCollectionData = collectionSize > 0;
     
-    if (!hasData) {
-      console.warn(`⚠️ Composite has no valid data for ${dataset} in ${finalYear}-${finalMonth || 'yearly'}`);
+    // If we have collection data but no valid stats, still proceed (common with cloud cover)
+    if (!hasCollectionData) {
+      console.warn(`⚠️ No data available for ${dataset} in ${finalYear}-${finalMonth || 'yearly'}`);
       return res.status(404).json({ 
-        error: `No valid data in composite for ${dataset} in ${finalYear}-${finalMonth || 'yearly'}`,
-        suggestion: "The area may be covered by clouds or have no data for this time period",
+        error: `No data available for ${dataset} in ${finalYear}-${finalMonth || 'yearly'}`,
+        suggestion: "Try a different year or month, or check the dataset's temporal coverage",
         dataset: dataset,
-        requestedParams: { year: finalYear, month: finalMonth, period },
-        stats: compositeStats
+        requestedParams: { year: finalYear, month: finalMonth, period }
       });
+    }
+    
+    // Log warning if stats are null but collection has data (cloud cover issue)
+    if (!hasValidStats && hasCollectionData) {
+      console.warn(`⚠️ Collection has ${collectionSize} images but composite stats are null - likely cloud cover issue`);
     }
 
     const visParams = {
       min: datasetConfig.min,
       max: datasetConfig.max,
       palette: finalPalette.split(","),
-      opacity: parseFloat(opacity),
     };
 
+    // ✅ CORRECT APPROACH: Apply visualization to the image first
+    const visualized = composite.visualize(visParams);
+    
+    console.log(`🎨 Applied visualization with palette: ${finalPalette}`);
+
     const mapId = await new Promise((resolve, reject) => {
-      ee.data.getMapId({ image: composite, visParams }, (map, err) => {
+      ee.data.getMapId({ image: visualized }, (map, err) => {
         if (err) reject(err);
         else resolve(map);
       });
@@ -326,7 +336,7 @@ export default async (req, res) => {
           first: new Date(dateRange[0]).toISOString().split('T')[0],
           last: new Date(dateRange[dateRange.length - 1]).toISOString().split('T')[0]
         } : null,
-        hasValidData: hasData,
+        hasValidData: hasValidStats, // Use hasValidStats from the new validation
         autoDetected: autoLatest === "true" || !year,
         boundingBox: bbox ? bbox.split(',').map(Number) : null
       },
