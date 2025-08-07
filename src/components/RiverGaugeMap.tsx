@@ -15,6 +15,7 @@ interface RiverGaugeMapProps {
 }
 
 export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
+  console.log('RiverGaugeMap rendering with apiKey:', apiKey ? 'present' : 'missing');
   const { map, isLoaded, error: mapError, resetView } = useGoogleMaps({ apiKey });
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
