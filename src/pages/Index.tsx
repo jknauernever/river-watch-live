@@ -1,19 +1,11 @@
-import { useState } from 'react';
-import { GoogleMapsLoader } from '@/components/GoogleMapsLoader';
 import { RiverGaugeMap } from '@/components/RiverGaugeMap';
 
 const Index = () => {
-  const [apiKey, setApiKey] = useState<string>('');
+  const apiKey = 'AIzaSyBZ1G7H8X9QXxG3yY6aKn2zxUOy3mE0qL4'; // Your Google Maps API key
 
   return (
     <div className="min-h-screen bg-background">
-      {!apiKey ? (
-        <div className="min-h-screen flex items-center justify-center p-4">
-          <GoogleMapsLoader onApiKeySet={setApiKey} />
-        </div>
-      ) : (
-        <RiverGaugeMap apiKey={apiKey} />
-      )}
+      <RiverGaugeMap apiKey={apiKey} />
     </div>
   );
 };
