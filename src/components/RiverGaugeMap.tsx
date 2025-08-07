@@ -185,10 +185,18 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       console.log(`Loaded ${locations.length} gauge locations`);
     } catch (error) {
       console.error('Error loading gauge locations:', error);
+      // Handle rate limiting gracefully - don't show toast for rate limit errors
+      if (error instanceof Error && !error.message.includes('rate limit')) {
+        toast({
+          title: "Loading Error",
+          description: "Failed to load gauge locations. Please try again.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [createBasicMarker, isLoading]);
+  }, [createBasicMarker, isLoading, toast]);
 
   const loadStations = useCallback(async (map: any) => {
     if (!showRiverData || basicGaugeLocations.length === 0) return;
@@ -300,7 +308,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         variant: "destructive",
       });
     }
-  }, [loadGoogleMapsScript, loadStations, toast]);
+  }, [loadGoogleMapsScript, loadGaugeLocations, toast, isLoading]);
 
   const resetView = useCallback(() => {
     if (mapInstanceRef.current) {

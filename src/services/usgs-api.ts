@@ -20,6 +20,7 @@ function calculateWaterLevel(value: number): WaterLevel {
 export class USGSService {
   private cache = new Map<string, any>();
   private cacheTimeout = 5 * 60 * 1000; // 5 minutes
+  private requestQueue = new Map<string, Promise<any>>();
 
   private getCached<T>(key: string): T | null {
     const cached = this.cache.get(key);
@@ -38,45 +39,60 @@ export class USGSService {
     const cached = this.getCached<USGSMonitoringLocation[]>(cacheKey);
     if (cached) return cached;
 
-    try {
-      const [minLng, minLat, maxLng, maxLat] = bbox;
-      const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
-      
-      // Only get basic location data - no water measurements yet
-      url.searchParams.set('bbox', `${minLng},${minLat},${maxLng},${maxLat}`);
-      url.searchParams.set('f', 'json');
-      url.searchParams.set('limit', '200'); // Reduced limit to avoid rate limiting
-      url.searchParams.set('apikey', USGS_API_KEY);
-      
-      console.log('Fetching USGS monitoring locations (locations only):', url.toString());
-
-      const response = await fetch(url.toString());
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('USGS API response:', response.status, errorText);
-        
-        // Handle rate limiting gracefully
-        if (response.status === 429) {
-          console.warn('USGS API rate limit reached. Using demo data.');
-          return this.generateDemoLocations(bbox);
-        }
-        
-        throw new Error(`USGS API error: ${response.status} - ${errorText}`);
-      }
-
-      const data = await response.json();
-      const locations = data.features || [];
-      
-      console.log(`Found ${locations.length} total monitoring locations`);
-      
-      this.setCache(cacheKey, locations);
-      return locations;
-    } catch (error) {
-      console.error('Error fetching monitoring locations:', error);
-      // Fallback to demo data if API fails
-      console.warn('Falling back to demo data due to API error');
-      return this.generateDemoLocations(bbox);
+    // Check if request is already in progress
+    if (this.requestQueue.has(cacheKey)) {
+      console.log('Request already in progress, waiting for result...');
+      return this.requestQueue.get(cacheKey)!;
     }
+
+    const requestPromise = (async () => {
+      try {
+        const [minLng, minLat, maxLng, maxLat] = bbox;
+        const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+        
+        // Only get basic location data - no water measurements yet
+        url.searchParams.set('bbox', `${minLng},${minLat},${maxLng},${maxLat}`);
+        url.searchParams.set('f', 'json');
+        url.searchParams.set('limit', '200'); // Reduced limit to avoid rate limiting
+        url.searchParams.set('apikey', USGS_API_KEY);
+        
+        console.log('Fetching USGS monitoring locations (locations only):', url.toString());
+
+        const response = await fetch(url.toString());
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('USGS API response:', response.status, errorText);
+          
+          // Handle rate limiting gracefully
+          if (response.status === 429) {
+            console.warn('USGS API rate limit reached. Using demo data.');
+            return this.generateDemoLocations(bbox);
+          }
+          
+          throw new Error(`USGS API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        const locations = data.features || [];
+        
+        console.log(`Found ${locations.length} total monitoring locations`);
+        
+        this.setCache(cacheKey, locations);
+        return locations;
+      } catch (error) {
+        console.error('Error fetching monitoring locations:', error);
+        // Fallback to demo data if API fails
+        console.warn('Falling back to demo data due to API error');
+        return this.generateDemoLocations(bbox);
+      } finally {
+        // Remove from queue when done
+        this.requestQueue.delete(cacheKey);
+      }
+    })();
+
+    // Store the promise in the queue
+    this.requestQueue.set(cacheKey, requestPromise);
+    return requestPromise;
   }
   
   // Generate demo locations when API is unavailable
