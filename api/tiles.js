@@ -162,8 +162,9 @@ export default async (req, res) => {
       geometry = ee.Geometry.Rectangle([minLng, minLat, maxLng, maxLat]);
       console.log(`🗺️ Using bounding box: [${minLng}, ${minLat}, ${maxLng}, ${maxLat}]`);
     } else {
-      geometry = ee.Geometry.Rectangle([-180, -90, 180, 90]);
-      console.log(`🌍 Using global geometry`);
+      // Use a more reasonable default area instead of global
+      geometry = ee.Geometry.Rectangle([-180, -60, 180, 85]); // Exclude Antarctica and use more reasonable bounds
+      console.log(`🌍 Using default geometry (excludes Antarctica)`);
     }
 
     let collection = ee.ImageCollection(datasetConfig.collection)
