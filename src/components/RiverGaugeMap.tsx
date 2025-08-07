@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { GaugeStation } from '@/types/usgs';
 import { usgsService } from '@/services/usgs-api';
+import { useGoogleMaps } from '@/hooks/useGoogleMaps';
+import { MapContainer } from '@/components/MapContainer';
+import { GaugeMarkers } from '@/components/GaugeMarkers';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,173 +14,22 @@ interface RiverGaugeMapProps {
   apiKey: string;
 }
 
-declare global {
-  interface Window {
-    google: any;
-    initGoogleMaps: () => void;
-  }
-}
-
 export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<any>(null);
-  const markersRef = useRef<any[]>([]);
-  const infoWindowRef = useRef<any>(null);
+  const { map, isLoaded, error: mapError, resetView } = useGoogleMaps({ apiKey });
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [stations, setStations] = useState<GaugeStation[]>([]);
   const [basicGaugeLocations, setBasicGaugeLocations] = useState<any[]>([]);
   const [selectedStation, setSelectedStation] = useState<GaugeStation | null>(null);
-  const [showRiverData, setShowRiverData] = useState(false); // Start with just locations
-  const [mapError, setMapError] = useState<string | null>(null);
+  const [showRiverData, setShowRiverData] = useState(false);
   const { toast } = useToast();
 
-  const loadGoogleMapsScript = useCallback(() => {
-    return new Promise((resolve, reject) => {
-      if (window.google && window.google.maps && window.google.maps.Map) {
-        console.log('Google Maps already loaded');
-        resolve(window.google);
-        return;
-      }
+  // Load gauge locations only once when map bounds change
+  const loadGaugeLocations = useCallback(async () => {
+    if (!map || isLoading) return;
 
-      // Remove any existing script to avoid conflicts
-      const existingScript = document.querySelector('script[src*="maps.googleapis.com"]');
-      if (existingScript) {
-        existingScript.remove();
-      }
-
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&loading=async&callback=initGoogleMaps`;
-      script.async = true;
-      script.defer = true;
-      
-      // Set up global callback
-      window.initGoogleMaps = () => {
-        console.log('Google Maps loaded successfully');
-        resolve(window.google);
-      };
-      
-      // Enhanced error handling
-      script.onerror = (event) => {
-        console.error('Google Maps script failed to load:', event);
-        setMapError('Failed to load Google Maps script');
-        reject(new Error('Failed to load Google Maps'));
-      };
-      
-      // Listen for quota errors at window level
-      window.addEventListener('error', (event) => {
-        if (event.message && event.message.includes('OverQuotaMapError')) {
-          console.error('Google Maps quota exceeded');
-          setMapError('Google Maps quota exceeded');
-          reject(new Error('Google Maps quota exceeded'));
-        }
-      });
-      
-      document.head.appendChild(script);
-    });
-  }, [apiKey]);
-
-  const createBasicMarker = useCallback((location: any, map: any) => {
-    const { google } = window;
-    
-    const marker = new google.maps.Marker({
-      position: { lat: location.coordinates[1], lng: location.coordinates[0] },
-      map: map,
-      title: location.name,
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 6,
-        fillColor: '#8e8e93', // Neutral gray
-        fillOpacity: 0.7,
-        strokeColor: '#ffffff',
-        strokeWeight: 1,
-      },
-    });
-
-    marker.addListener('click', () => {
-      const content = `
-        <div class="p-3 max-w-sm">
-          <h3 class="font-semibold text-primary mb-2">${location.name}</h3>
-          <div class="space-y-1 text-sm">
-            <div><strong>Site ID:</strong> ${location.siteId}</div>
-            <div><strong>Type:</strong> ${location.siteType === 'ST' ? 'Stream' : location.siteType === 'LK' ? 'Lake' : 'Estuary'}</div>
-            <div><strong>Coordinates:</strong> ${location.coordinates[1].toFixed(4)}, ${location.coordinates[0].toFixed(4)}</div>
-            <div class="text-muted-foreground text-xs mt-2">Click "Show River Data" to see current water levels</div>
-          </div>
-        </div>
-      `;
-
-      if (infoWindowRef.current) {
-        infoWindowRef.current.close();
-      }
-
-      infoWindowRef.current = new google.maps.InfoWindow({
-        content: content,
-      });
-
-      infoWindowRef.current.open(map, marker);
-    });
-
-    return marker;
-  }, []);
-
-  const createMarker = useCallback((station: GaugeStation, map: any) => {
-    const { google } = window;
-    
-    const marker = new google.maps.Marker({
-      position: { lat: station.coordinates[1], lng: station.coordinates[0] },
-      map: map,
-      title: station.name,
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 8,
-        fillColor: station.waterLevel.color,
-        fillOpacity: 0.8,
-        strokeColor: '#ffffff',
-        strokeWeight: 2,
-      },
-    });
-
-    marker.addListener('click', () => {
-      setSelectedStation(station);
-      
-      const content = `
-        <div class="p-3 max-w-sm">
-          <h3 class="font-semibold text-primary mb-2">${station.name}</h3>
-          <div class="space-y-1 text-sm">
-            <div><strong>Site ID:</strong> ${station.siteId}</div>
-            <div><strong>Coordinates:</strong> ${station.coordinates[1].toFixed(4)}, ${station.coordinates[0].toFixed(4)}</div>
-            <div><strong>Gage Height:</strong> ${station.latestHeight?.toFixed(2) || 'N/A'} ft</div>
-            <div><strong>Water Level:</strong> 
-              <span style="color: ${station.waterLevel.color}; font-weight: bold; text-transform: capitalize;">
-                ${station.waterLevel.level}
-              </span>
-            </div>
-            ${station.lastUpdated ? `<div><strong>Last Updated:</strong> ${new Date(station.lastUpdated).toLocaleString()}</div>` : ''}
-          </div>
-        </div>
-      `;
-
-      if (infoWindowRef.current) {
-        infoWindowRef.current.close();
-      }
-
-      infoWindowRef.current = new google.maps.InfoWindow({
-        content: content,
-      });
-
-      infoWindowRef.current.open(map, marker);
-    });
-
-    return marker;
-  }, []);
-
-  const loadGaugeLocations = useCallback(async (map: any) => {
     const bounds = map.getBounds();
     if (!bounds) return;
-
-    // Prevent multiple simultaneous calls
-    if (isLoading) return;
 
     const ne = bounds.getNorthEast();
     const sw = bounds.getSouthWest();
@@ -189,42 +41,22 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     try {
       const locations = await usgsService.getGaugeLocationsOnly(bbox);
       setBasicGaugeLocations(locations);
-
-      // Clear existing markers
-      markersRef.current.forEach(marker => marker.setMap(null));
-      markersRef.current = [];
-
-      // Create basic location markers
-      const newMarkers = locations.map(location => createBasicMarker(location, map));
-      markersRef.current = newMarkers;
-
       console.log(`Loaded ${locations.length} gauge locations`);
     } catch (error) {
       console.error('Error loading gauge locations:', error);
-      // Handle rate limiting gracefully - don't show any error notifications
     } finally {
       setIsLoading(false);
     }
-  }, [createBasicMarker, toast]);
+  }, [map, isLoading]);
 
-  const loadStations = useCallback(async (map: any) => {
-    if (!showRiverData || basicGaugeLocations.length === 0) return;
-    
-    // Prevent multiple simultaneous calls
-    if (isLoadingData) return;
+  // Load enhanced station data when requested
+  const loadStations = useCallback(async () => {
+    if (!showRiverData || basicGaugeLocations.length === 0 || isLoadingData) return;
     
     setIsLoadingData(true);
     try {
       const enhancedStations = await usgsService.enhanceGaugeStationsWithData(basicGaugeLocations);
       setStations(enhancedStations);
-
-      // Clear existing markers
-      markersRef.current.forEach(marker => marker.setMap(null));
-      markersRef.current = [];
-
-      // Create enhanced markers with water data
-      const newMarkers = enhancedStations.map(station => createMarker(station, map));
-      markersRef.current = newMarkers;
 
       toast({
         title: "Water Data Loaded",
@@ -240,180 +72,75 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     } finally {
       setIsLoadingData(false);
     }
-  }, [createMarker, toast, showRiverData, basicGaugeLocations, isLoadingData]);
+  }, [showRiverData, basicGaugeLocations, isLoadingData, toast]);
 
-  const initializeMap = useCallback(async () => {
-    // Don't initialize if there's already a map error
-    if (mapError) {
-      console.log('Skipping map initialization due to previous error:', mapError);
-      return;
-    }
-    
+  // Set up map listeners once when map is loaded
+  useEffect(() => {
+    if (!map || !isLoaded) return;
+
+    let timeoutId: NodeJS.Timeout;
+    let lastBounds: string | null = null;
+
+    // Set up search functionality
     try {
-      console.log('Initializing Google Maps...');
-      await loadGoogleMapsScript();
-      
-      if (!mapRef.current) {
-        console.error('Map container not found');
-        return;
-      }
+      const autocomplete = new window.google.maps.places.Autocomplete(
+        document.getElementById('search-input') as HTMLInputElement
+      );
 
-      const { google } = window;
-      
-      if (!google || !google.maps || !google.maps.Map) {
-        throw new Error('Google Maps API not properly loaded');
-      }
-      
-      console.log('Creating map instance...');
-      
-      let map;
-      try {
-        map = new google.maps.Map(mapRef.current, {
-          zoom: 9,
-          center: { lat: 47.6062, lng: -122.3321 }, // Puget Sound, Washington
-          mapTypeId: 'terrain',
-          styles: [
-            {
-              featureType: 'water',
-              elementType: 'geometry',
-              stylers: [{ color: '#e9f3ff' }]
-            },
-            {
-              featureType: 'water',
-              elementType: 'labels.text.fill',
-              stylers: [{ color: '#1a73e8' }]
-            }
-          ]
-        });
-      } catch (mapError) {
-        console.error('Map creation failed:', mapError);
-        if (mapError instanceof Error && mapError.message.includes('quota')) {
-          setMapError('Google Maps quota exceeded');
-          toast({
-            title: "Google Maps Quota Exceeded",
-            description: "The API key has reached its usage limit. Please try again later.",
-            variant: "destructive",
-          });
-        } else {
-          setMapError('Failed to create map');
-          toast({
-            title: "Map Creation Failed",
-            description: "Unable to create the map. Please check your API key.",
-            variant: "destructive",
-          });
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (place.geometry?.location) {
+          map.setCenter(place.geometry.location);
+          map.setZoom(10);
         }
-        return;
-      }
-
-      mapInstanceRef.current = map;
-
-      // Check for map errors
-      map.addListener('tilesloaded', () => {
-        // Map loaded successfully, now set up search and listeners
-        try {
-          const autocomplete = new google.maps.places.Autocomplete(
-            document.getElementById('search-input') as HTMLInputElement
-          );
-
-          autocomplete.addListener('place_changed', () => {
-            const place = autocomplete.getPlace();
-            if (place.geometry?.location) {
-              map.setCenter(place.geometry.location);
-              map.setZoom(10);
-            }
-          });
-        } catch (error) {
-          console.warn('Search functionality unavailable:', error);
-        }
-
-        // Load initial gauge locations (not water data yet) - only once
-        google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
-          setTimeout(() => loadGaugeLocations(map), 1000);
-        });
-
-        // Reload locations when map moves - much more conservative approach
-        let timeoutId: NodeJS.Timeout;
-        let lastBounds: string | null = null;
-        
-        map.addListener('bounds_changed', () => {
-          clearTimeout(timeoutId);
-          timeoutId = setTimeout(() => {
-            const currentBounds = map.getBounds();
-            if (!currentBounds || isLoading) return;
-            
-            const boundsKey = `${currentBounds.getNorthEast().lat().toFixed(2)}-${currentBounds.getSouthWest().lat().toFixed(2)}`;
-            
-            // Skip if same bounds 
-            if (boundsKey === lastBounds) return;
-            
-            lastBounds = boundsKey;
-            loadGaugeLocations(map);
-          }, 8000); // 8 seconds to really minimize calls
-        });
       });
-
     } catch (error) {
-      console.error('Failed to initialize map:', error);
-      
-      // Handle quota errors specifically
-      if (error instanceof Error && error.message.includes('quota')) {
-        toast({
-          title: "Google Maps Quota Exceeded",
-          description: "The Google Maps API key has reached its usage limit. Please try again later.",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Map Loading Error", 
-          description: "Failed to load Google Maps. Please check your API key.",
-          variant: "destructive",
-        });
-      }
+      console.warn('Search functionality unavailable:', error);
     }
-  }, [loadGoogleMapsScript, loadGaugeLocations, toast, isLoading]);
 
-  const resetView = useCallback(() => {
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.setCenter({ lat: 47.6062, lng: -122.3321 });
-      mapInstanceRef.current.setZoom(9);
-    }
-  }, []);
+    // Load initial gauge locations - only once
+    window.google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
+      setTimeout(() => loadGaugeLocations(), 1000);
+    });
+
+    // Reload locations when map moves - debounced
+    const boundsChangedListener = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        const currentBounds = map.getBounds();
+        if (!currentBounds || isLoading) return;
+        
+        const boundsKey = `${currentBounds.getNorthEast().lat().toFixed(2)}-${currentBounds.getSouthWest().lat().toFixed(2)}`;
+        
+        if (boundsKey === lastBounds) return;
+        
+        lastBounds = boundsKey;
+        loadGaugeLocations();
+      }, 5000); // 5 seconds debounce
+    };
+
+    map.addListener('bounds_changed', boundsChangedListener);
+
+    return () => {
+      clearTimeout(timeoutId);
+      window.google?.maps?.event?.clearListeners(map, 'bounds_changed');
+    };
+  }, [map, isLoaded, loadGaugeLocations, isLoading]);
 
   const toggleRiverData = useCallback(() => {
     setShowRiverData(prev => {
       const newValue = !prev;
       
-      if (!newValue) {
-        // Switch back to basic location markers
-        if (mapInstanceRef.current && basicGaugeLocations.length > 0) {
-          markersRef.current.forEach(marker => marker.setMap(null));
-          markersRef.current = [];
-          
-          const basicMarkers = basicGaugeLocations.map(location => 
-            createBasicMarker(location, mapInstanceRef.current)
-          );
-          markersRef.current = basicMarkers;
-        }
-        setStations([]);
-        if (infoWindowRef.current) {
-          infoWindowRef.current.close();
-        }
+      if (newValue) {
+        loadStations();
       } else {
-        // Load water data for current locations
-        if (mapInstanceRef.current) {
-          loadStations(mapInstanceRef.current);
-        }
+        setStations([]);
+        setSelectedStation(null);
       }
       
       return newValue;
     });
-  }, [loadStations, basicGaugeLocations, createBasicMarker]);
-
-  useEffect(() => {
-    if (apiKey && !mapInstanceRef.current) {
-      initializeMap();
-    }
-  }, [apiKey, initializeMap]);
+  }, [loadStations]);
 
   
   // Show error state if map failed to load
@@ -431,10 +158,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
               }
             </p>
             <Button 
-              onClick={() => {
-                setMapError(null);
-                window.location.reload();
-              }}
+              onClick={() => window.location.reload()}
               variant="outline"
             >
               <RotateCcw className="w-4 h-4 mr-2" />
@@ -448,6 +172,18 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
   return (
     <div className="relative w-full h-screen bg-background">
+      {/* Map Container */}
+      <MapContainer />
+      
+      {/* Markers Component */}
+      <GaugeMarkers 
+        map={map}
+        basicLocations={basicGaugeLocations}
+        stations={stations}
+        showRiverData={showRiverData}
+        onStationSelect={setSelectedStation}
+      />
+
       {/* Header */}
       <div className="absolute top-4 left-4 right-4 z-10 flex gap-3 items-center">
         <Card className="flex-1 max-w-md">
@@ -477,7 +213,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </Button>
       </div>
 
-      {/* Loading indicator - only show for water data loading */}
+      {/* Loading indicator */}
       {isLoadingData && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
           <Card>
@@ -529,8 +265,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </div>
       )}
 
-      {/* Map container */}
-      <div ref={mapRef} className="w-full h-full" />
     </div>
   );
 };
