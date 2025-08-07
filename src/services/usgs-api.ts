@@ -44,7 +44,7 @@ export class USGSService {
       // Only use valid parameters that the API supports
       url.searchParams.set('bbox', `${minLng},${minLat},${maxLng},${maxLat}`);
       url.searchParams.set('f', 'json');
-      url.searchParams.set('limit', '500'); // Reduced limit for better performance
+      url.searchParams.set('limit', '1000'); // Allow more results
       
       console.log('Fetching USGS monitoring locations:', url.toString());
 
@@ -117,9 +117,9 @@ export class USGSService {
 
     console.log(`Found ${surfaceWaterSites.length} surface water sites`);
 
-    // Process surface water sites in smaller batches
-    const batchSize = 5;
-    for (let i = 0; i < Math.min(surfaceWaterSites.length, 50); i += batchSize) { // Limit to 50 for performance
+    // Process all surface water sites in batches
+    const batchSize = 8; // Reasonable batch size for API calls
+    for (let i = 0; i < surfaceWaterSites.length; i += batchSize) {
       const batch = surfaceWaterSites.slice(i, i + batchSize);
       const batchPromises = batch.map(async (location: any) => {
         const siteId = location.properties.monitoring_location_number;
@@ -146,12 +146,13 @@ export class USGSService {
         }
       });
 
-      // Small delay between batches
+      // Small delay between batches to be respectful to the API
       if (i + batchSize < surfaceWaterSites.length) {
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 150));
       }
     }
 
+    console.log(`Successfully processed ${stations.length} gauge stations`);
     return stations;
   }
 
