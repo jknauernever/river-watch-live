@@ -26,6 +26,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [stations, setStations] = useState<GaugeStation[]>([]);
   const [selectedStation, setSelectedStation] = useState<GaugeStation | null>(null);
+  const [showRiverData, setShowRiverData] = useState(true);
   const { toast } = useToast();
 
   const loadGoogleMapsScript = useCallback(() => {
@@ -97,6 +98,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   }, []);
 
   const loadStations = useCallback(async (map: any) => {
+    if (!showRiverData) return; // Don't load if river data is hidden
+    
     const bounds = map.getBounds();
     if (!bounds) return;
 
@@ -133,7 +136,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     } finally {
       setIsLoading(false);
     }
-  }, [createMarker, toast]);
+  }, [createMarker, toast, showRiverData]);
 
   const initializeMap = useCallback(async () => {
     try {
@@ -205,6 +208,29 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     }
   }, []);
 
+  const toggleRiverData = useCallback(() => {
+    setShowRiverData(prev => {
+      const newValue = !prev;
+      
+      if (!newValue) {
+        // Hide all markers
+        markersRef.current.forEach(marker => marker.setMap(null));
+        markersRef.current = [];
+        setStations([]);
+        if (infoWindowRef.current) {
+          infoWindowRef.current.close();
+        }
+      } else {
+        // Reload stations
+        if (mapInstanceRef.current) {
+          loadStations(mapInstanceRef.current);
+        }
+      }
+      
+      return newValue;
+    });
+  }, [loadStations]);
+
   useEffect(() => {
     initializeMap();
   }, [initializeMap]);
@@ -212,7 +238,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   return (
     <div className="relative w-full h-screen bg-background">
       {/* Header */}
-      <div className="absolute top-4 left-4 right-4 z-10 flex gap-4 items-center">
+      <div className="absolute top-4 left-4 right-4 z-10 flex gap-3 items-center">
         <Card className="flex-1 max-w-md">
           <CardContent className="p-3">
             <input
@@ -224,14 +250,23 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           </CardContent>
         </Card>
         
+        <Button 
+          onClick={toggleRiverData} 
+          variant={showRiverData ? "default" : "outline"} 
+          size="sm"
+        >
+          <Droplets className="w-4 h-4 mr-2" />
+          {showRiverData ? "Hide" : "Show"} River Data
+        </Button>
+        
         <Button onClick={resetView} variant="secondary" size="sm">
           <RotateCcw className="w-4 h-4 mr-2" />
-          Reset View
+          Reset
         </Button>
       </div>
 
       {/* Loading indicator */}
-      {isLoading && (
+      {isLoading && showRiverData && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
           <Card>
             <CardContent className="p-3 flex items-center gap-2">
@@ -243,35 +278,37 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       )}
 
       {/* Legend */}
-      <Card className="absolute bottom-4 left-4 z-10">
-        <CardContent className="p-3">
-          <div className="flex items-center gap-1 mb-2">
-            <Droplets className="w-4 h-4 text-primary" />
-            <span className="text-sm font-medium">Water Levels</span>
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-3 h-3 rounded-full bg-water-low"></div>
-              <span>Low (&lt; 2 ft)</span>
+      {showRiverData && (
+        <Card className="absolute bottom-4 left-4 z-10">
+          <CardContent className="p-3">
+            <div className="flex items-center gap-1 mb-2">
+              <Droplets className="w-4 h-4 text-primary" />
+              <span className="text-sm font-medium">Water Levels</span>
             </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-3 h-3 rounded-full bg-water-medium"></div>
-              <span>Medium (2-5 ft)</span>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-3 h-3 rounded-full bg-water-low"></div>
+                <span>Low (&lt; 2 ft)</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-3 h-3 rounded-full bg-water-medium"></div>
+                <span>Medium (2-5 ft)</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-3 h-3 rounded-full bg-water-high"></div>
+                <span>High (5-10 ft)</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-3 h-3 rounded-full bg-water-critical"></div>
+                <span>Critical (&gt; 10 ft)</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-3 h-3 rounded-full bg-water-high"></div>
-              <span>High (5-10 ft)</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-3 h-3 rounded-full bg-water-critical"></div>
-              <span>Critical (&gt; 10 ft)</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Station count */}
-      {stations.length > 0 && (
+      {stations.length > 0 && showRiverData && (
         <div className="absolute bottom-4 right-4 z-10">
           <Badge variant="secondary">
             {stations.length} gauge{stations.length !== 1 ? 's' : ''} loaded
