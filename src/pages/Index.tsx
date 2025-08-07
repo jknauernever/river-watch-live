@@ -1,12 +1,19 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useState } from 'react';
+import { GoogleMapsLoader } from '@/components/GoogleMapsLoader';
+import { RiverGaugeMap } from '@/components/RiverGaugeMap';
 
 const Index = () => {
+  const [apiKey, setApiKey] = useState<string>('');
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
-      </div>
+    <div className="min-h-screen bg-background">
+      {!apiKey ? (
+        <div className="min-h-screen flex items-center justify-center p-4">
+          <GoogleMapsLoader onApiKeySet={setApiKey} />
+        </div>
+      ) : (
+        <RiverGaugeMap apiKey={apiKey} />
+      )}
     </div>
   );
 };

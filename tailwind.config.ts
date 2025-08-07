@@ -52,6 +52,12 @@ export default {
 					DEFAULT: 'hsl(var(--card))',
 					foreground: 'hsl(var(--card-foreground))'
 				},
+				water: {
+					low: 'hsl(var(--water-low))',
+					medium: 'hsl(var(--water-medium))',
+					high: 'hsl(var(--water-high))',
+					critical: 'hsl(var(--water-critical))'
+				},
 				sidebar: {
 					DEFAULT: 'hsl(var(--sidebar-background))',
 					foreground: 'hsl(var(--sidebar-foreground))',
