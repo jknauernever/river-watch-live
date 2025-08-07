@@ -4,6 +4,7 @@ import { RiverGaugeMap } from '@/components/RiverGaugeMap';
 
 const Index = () => {
   const [apiKey, setApiKey] = useState<string>('');
+  console.log('Index page loading...');
 
   useEffect(() => {
     // Check if API key is already stored

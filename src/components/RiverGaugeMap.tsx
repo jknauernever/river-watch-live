@@ -15,7 +15,8 @@ interface RiverGaugeMapProps {
 }
 
 export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
-  console.log('RiverGaugeMap rendering with apiKey:', apiKey ? 'present' : 'missing');
+  console.log('NEW RiverGaugeMap rendering with apiKey:', apiKey ? 'present' : 'missing');
+  
   const { map, isLoaded, error: mapError, resetView } = useGoogleMaps({ apiKey });
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
@@ -143,7 +144,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     });
   }, [loadStations]);
 
-  
   // Show error state if map failed to load
   if (mapError) {
     return (
@@ -265,7 +265,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           </Badge>
         </div>
       )}
-
     </div>
   );
 };
