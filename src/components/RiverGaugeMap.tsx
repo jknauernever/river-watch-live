@@ -105,27 +105,11 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       setTimeout(() => loadGaugeLocations(), 1000);
     });
 
-    // Reload locations when map moves - debounced
-    const boundsChangedListener = () => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        const currentBounds = map.getBounds();
-        if (!currentBounds || isLoading) return;
-        
-        const boundsKey = `${currentBounds.getNorthEast().lat().toFixed(2)}-${currentBounds.getSouthWest().lat().toFixed(2)}`;
-        
-        if (boundsKey === lastBounds) return;
-        
-        lastBounds = boundsKey;
-        loadGaugeLocations();
-      }, 5000); // 5 seconds debounce
-    };
-
-    map.addListener('bounds_changed', boundsChangedListener);
+    // Note: Removed automatic bounds_changed listener to prevent markers from moving during zoom/pan
+    // Users can manually refresh if they want to see gauges in new areas
 
     return () => {
       clearTimeout(timeoutId);
-      window.google?.maps?.event?.clearListeners(map, 'bounds_changed');
     };
   }, [map, isLoaded, loadGaugeLocations, isLoading]);
 
