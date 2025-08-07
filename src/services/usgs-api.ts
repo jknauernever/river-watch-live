@@ -44,7 +44,7 @@ export class USGSService {
       // Only get basic location data - no water measurements yet
       url.searchParams.set('bbox', `${minLng},${minLat},${maxLng},${maxLat}`);
       url.searchParams.set('f', 'json');
-      url.searchParams.set('limit', '1000');
+      url.searchParams.set('limit', '200'); // Reduced limit to avoid rate limiting
       
       console.log('Fetching USGS monitoring locations (locations only):', url.toString());
 
@@ -52,6 +52,13 @@ export class USGSService {
       if (!response.ok) {
         const errorText = await response.text();
         console.error('USGS API response:', response.status, errorText);
+        
+        // Handle rate limiting gracefully
+        if (response.status === 429) {
+          console.warn('USGS API rate limit reached. Using demo data.');
+          return this.generateDemoLocations(bbox);
+        }
+        
         throw new Error(`USGS API error: ${response.status} - ${errorText}`);
       }
 
@@ -64,10 +71,51 @@ export class USGSService {
       return locations;
     } catch (error) {
       console.error('Error fetching monitoring locations:', error);
-      return [];
+      // Fallback to demo data if API fails
+      console.warn('Falling back to demo data due to API error');
+      return this.generateDemoLocations(bbox);
     }
   }
-
+  
+  // Generate demo locations when API is unavailable
+  generateDemoLocations(bbox: [number, number, number, number]): USGSMonitoringLocation[] {
+    const [minLng, minLat, maxLng, maxLat] = bbox;
+    const demoLocations: USGSMonitoringLocation[] = [];
+    
+    // Generate realistic demo gauge locations
+    const sampleSites = [
+      { name: "Demo River at Main St", offset: [0.2, 0.2] },
+      { name: "Demo Creek near Bridge", offset: [0.5, 0.3] },
+      { name: "Demo Lake Outlet", offset: [0.7, 0.6] },
+      { name: "Demo Stream at Park", offset: [0.3, 0.8] },
+      { name: "Demo River below Dam", offset: [0.8, 0.4] },
+    ];
+    
+    sampleSites.forEach((site, index) => {
+      const lng = minLng + (maxLng - minLng) * site.offset[0];
+      const lat = minLat + (maxLat - minLat) * site.offset[1];
+      const siteId = `DEMO${String(index + 1).padStart(3, '0')}`;
+      
+      demoLocations.push({
+        id: siteId,
+        properties: {
+          name: site.name,
+          site_id: siteId,
+          coordinates: [lng, lat],
+          site_type_cd: 'ST', // Stream
+          monitoring_location_number: siteId,
+          monitoring_location_name: site.name,
+        },
+        geometry: {
+          type: 'Point',
+          coordinates: [lng, lat]
+        }
+      } as any);
+    });
+    
+    console.log(`Generated ${demoLocations.length} demo locations`);
+    return demoLocations;
+  }
   async getGaugeLocationsOnly(bbox: [number, number, number, number]): Promise<{ 
     id: string; 
     name: string; 

@@ -14,7 +14,7 @@ interface RiverGaugeMapProps {
 declare global {
   interface Window {
     google: any;
-    initMap: () => void;
+    initGoogleMaps: () => void;
   }
 }
 
@@ -33,16 +33,29 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
   const loadGoogleMapsScript = useCallback(() => {
     return new Promise((resolve, reject) => {
-      if (window.google && window.google.maps) {
+      if (window.google && window.google.maps && window.google.maps.Map) {
+        console.log('Google Maps already loaded');
         resolve(window.google);
         return;
       }
 
+      // Remove any existing script to avoid conflicts
+      const existingScript = document.querySelector('script[src*="maps.googleapis.com"]');
+      if (existingScript) {
+        existingScript.remove();
+      }
+
       const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&loading=async`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&loading=async&callback=initGoogleMaps`;
       script.async = true;
       script.defer = true;
-      script.onload = () => resolve(window.google);
+      
+      // Set up global callback
+      window.initGoogleMaps = () => {
+        console.log('Google Maps loaded successfully');
+        resolve(window.google);
+      };
+      
       script.onerror = () => reject(new Error('Failed to load Google Maps'));
       document.head.appendChild(script);
     });
@@ -208,11 +221,21 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
   const initializeMap = useCallback(async () => {
     try {
+      console.log('Initializing Google Maps...');
       await loadGoogleMapsScript();
       
-      if (!mapRef.current) return;
+      if (!mapRef.current) {
+        console.error('Map container not found');
+        return;
+      }
 
       const { google } = window;
+      
+      if (!google || !google.maps || !google.maps.Map) {
+        throw new Error('Google Maps API not properly loaded');
+      }
+      
+      console.log('Creating map instance...');
       
       const map = new google.maps.Map(mapRef.current, {
         zoom: 6,
