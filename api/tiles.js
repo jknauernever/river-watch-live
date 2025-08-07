@@ -116,13 +116,15 @@ export default async (req, res) => {
   const { query } = req;
   const {
     dataset = "ndvi",
-    year = "2024",
+    year,
     month,
     period = "monthly",
     palette,
     opacity = "1.0",
     apikey,
-    check = "false" // New parameter to just check data availability
+    check = "false", // New parameter to just check data availability
+    bbox, // New parameter for bounding box: "minLng,minLat,maxLng,maxLat"
+    autoLatest = "false" // New parameter to auto-detect latest data
   } = query;
 
   // Check if environment variables are set
@@ -153,21 +155,65 @@ export default async (req, res) => {
     // Use dataset-specific palette if not provided
     const finalPalette = palette || datasetConfig.defaultPalette;
 
-    const geometry = ee.Geometry.Rectangle([-180, -90, 180, 90]);
+    // Parse bounding box if provided, otherwise use global
+    let geometry;
+    if (bbox) {
+      const [minLng, minLat, maxLng, maxLat] = bbox.split(',').map(Number);
+      geometry = ee.Geometry.Rectangle([minLng, minLat, maxLng, maxLat]);
+      console.log(`🗺️ Using bounding box: [${minLng}, ${minLat}, ${maxLng}, ${maxLat}]`);
+    } else {
+      geometry = ee.Geometry.Rectangle([-180, -90, 180, 90]);
+      console.log(`🌍 Using global geometry`);
+    }
 
     let collection = ee.ImageCollection(datasetConfig.collection)
       .select(datasetConfig.band)
       .filterBounds(geometry);
 
-    if (period === "monthly" && month) {
-      collection = collection
-        .filterDate(`${year}-${month}-01`, `${year}-${month}-28`);
-    } else {
-      collection = collection.filterDate(`${year}-01-01`, `${year}-12-31`);
+    // Auto-detect latest available data if requested
+    let finalYear = year;
+    let finalMonth = month;
+    
+    if (autoLatest === "true" || !year) {
+      console.log(`🔍 Auto-detecting latest available data for ${dataset}`);
+      
+      // Get the latest date from the collection
+      const latestDate = await new Promise((resolve, reject) => {
+        collection.aggregate_array('system:time_start')
+          .sort()
+          .reverse()
+          .limit(1)
+          .evaluate((dates, err) => {
+            if (err) reject(err);
+            else resolve(dates[0]);
+          });
+      });
+      
+      if (latestDate) {
+        const latestDateObj = new Date(latestDate);
+        finalYear = latestDateObj.getFullYear().toString();
+        finalMonth = (latestDateObj.getMonth() + 1).toString();
+        console.log(`📅 Auto-detected latest data: ${finalYear}-${finalMonth}`);
+      } else {
+        // Fallback to current year if no data found
+        finalYear = new Date().getFullYear().toString();
+        finalMonth = "12";
+        console.log(`⚠️ No data found, using fallback: ${finalYear}-${finalMonth}`);
+      }
+    }
+
+    // Filter by date if year is specified
+    if (finalYear) {
+      if (period === "monthly" && finalMonth) {
+        collection = collection
+          .filterDate(`${finalYear}-${finalMonth}-01`, `${finalYear}-${finalMonth}-28`);
+      } else {
+        collection = collection.filterDate(`${finalYear}-01-01`, `${finalYear}-12-31`);
+      }
     }
 
     // 🔍 VALIDATE DATA AVAILABILITY
-    console.log(`🔍 Checking data availability for ${dataset} (${year}-${month || 'yearly'})`);
+    console.log(`🔍 Checking data availability for ${dataset} (${finalYear}-${finalMonth || 'yearly'})`);
     
     // Get the size of the collection to check if there's any data
     const collectionSize = await new Promise((resolve, reject) => {
@@ -180,12 +226,12 @@ export default async (req, res) => {
     console.log(`📊 Collection size: ${collectionSize} images`);
     
     if (collectionSize === 0) {
-      console.warn(`⚠️ No data available for ${dataset} in ${year}-${month || 'yearly'}`);
+      console.warn(`⚠️ No data available for ${dataset} in ${finalYear}-${finalMonth || 'yearly'}`);
       return res.status(404).json({ 
-        error: `No data available for ${dataset} in ${year}-${month || 'yearly'}`,
+        error: `No data available for ${dataset} in ${finalYear}-${finalMonth || 'yearly'}`,
         suggestion: "Try a different year or month, or check the dataset's temporal coverage",
         dataset: dataset,
-        requestedParams: { year, month, period }
+        requestedParams: { year: finalYear, month: finalMonth, period }
       });
     }
 
@@ -215,7 +261,8 @@ export default async (req, res) => {
             first: new Date(dateRange[0]).toISOString().split('T')[0],
             last: new Date(dateRange[dateRange.length - 1]).toISOString().split('T')[0]
           } : null,
-          requestedParams: { year, month, period }
+          requestedParams: { year: finalYear, month: finalMonth, period },
+          autoDetected: autoLatest === "true" || !year
         }
       });
     }
@@ -241,12 +288,12 @@ export default async (req, res) => {
     const hasData = Object.values(compositeStats).some(value => value !== null && !isNaN(value));
     
     if (!hasData) {
-      console.warn(`⚠️ Composite has no valid data for ${dataset} in ${year}-${month || 'yearly'}`);
+      console.warn(`⚠️ Composite has no valid data for ${dataset} in ${finalYear}-${finalMonth || 'yearly'}`);
       return res.status(404).json({ 
-        error: `No valid data in composite for ${dataset} in ${year}-${month || 'yearly'}`,
+        error: `No valid data in composite for ${dataset} in ${finalYear}-${finalMonth || 'yearly'}`,
         suggestion: "The area may be covered by clouds or have no data for this time period",
         dataset: dataset,
-        requestedParams: { year, month, period },
+        requestedParams: { year: finalYear, month: finalMonth, period },
         stats: compositeStats
       });
     }
@@ -277,11 +324,13 @@ export default async (req, res) => {
           first: new Date(dateRange[0]).toISOString().split('T')[0],
           last: new Date(dateRange[dateRange.length - 1]).toISOString().split('T')[0]
         } : null,
-        hasValidData: hasData
+        hasValidData: hasData,
+        autoDetected: autoLatest === "true" || !year,
+        boundingBox: bbox ? bbox.split(',').map(Number) : null
       },
       parameters: {
-        year,
-        month,
+        year: finalYear,
+        month: finalMonth,
         period,
         palette: finalPalette,
         opacity
