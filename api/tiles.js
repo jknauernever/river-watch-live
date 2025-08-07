@@ -122,6 +122,7 @@ export default async (req, res) => {
     palette,
     opacity = "1.0",
     apikey,
+    check = "false" // New parameter to just check data availability
   } = query;
 
   // Check if environment variables are set
@@ -165,7 +166,90 @@ export default async (req, res) => {
       collection = collection.filterDate(`${year}-01-01`, `${year}-12-31`);
     }
 
+    // 🔍 VALIDATE DATA AVAILABILITY
+    console.log(`🔍 Checking data availability for ${dataset} (${year}-${month || 'yearly'})`);
+    
+    // Get the size of the collection to check if there's any data
+    const collectionSize = await new Promise((resolve, reject) => {
+      collection.size().evaluate((size, err) => {
+        if (err) reject(err);
+        else resolve(size);
+      });
+    });
+    
+    console.log(`📊 Collection size: ${collectionSize} images`);
+    
+    if (collectionSize === 0) {
+      console.warn(`⚠️ No data available for ${dataset} in ${year}-${month || 'yearly'}`);
+      return res.status(404).json({ 
+        error: `No data available for ${dataset} in ${year}-${month || 'yearly'}`,
+        suggestion: "Try a different year or month, or check the dataset's temporal coverage",
+        dataset: dataset,
+        requestedParams: { year, month, period }
+      });
+    }
+
+    // Get the date range of available data
+    const dateRange = await new Promise((resolve, reject) => {
+      collection.aggregate_array('system:time_start').evaluate((dates, err) => {
+        if (err) reject(err);
+        else resolve(dates);
+      });
+    });
+    
+    if (dateRange && dateRange.length > 0) {
+      const firstDate = new Date(dateRange[0]);
+      const lastDate = new Date(dateRange[dateRange.length - 1]);
+      console.log(`📅 Data available from ${firstDate.toISOString().split('T')[0]} to ${lastDate.toISOString().split('T')[0]}`);
+    }
+
+    // If just checking availability, return the data info
+    if (check === "true") {
+      return res.json({
+        dataset: dataset,
+        description: datasetConfig.description,
+        dataAvailable: true,
+        dataInfo: {
+          imageCount: collectionSize,
+          dateRange: dateRange ? {
+            first: new Date(dateRange[0]).toISOString().split('T')[0],
+            last: new Date(dateRange[dateRange.length - 1]).toISOString().split('T')[0]
+          } : null,
+          requestedParams: { year, month, period }
+        }
+      });
+    }
+
     const composite = collection.mean();
+
+    // 🔍 VALIDATE COMPOSITE HAS DATA
+    const compositeStats = await new Promise((resolve, reject) => {
+      composite.reduceRegion({
+        reducer: ee.Reducer.mean(),
+        geometry: geometry,
+        scale: 1000,
+        maxPixels: 1e6
+      }).evaluate((stats, err) => {
+        if (err) reject(err);
+        else resolve(stats);
+      });
+    });
+    
+    console.log(`📈 Composite statistics:`, compositeStats);
+    
+    // Check if the composite has any non-null values
+    const hasData = Object.values(compositeStats).some(value => value !== null && !isNaN(value));
+    
+    if (!hasData) {
+      console.warn(`⚠️ Composite has no valid data for ${dataset} in ${year}-${month || 'yearly'}`);
+      return res.status(404).json({ 
+        error: `No valid data in composite for ${dataset} in ${year}-${month || 'yearly'}`,
+        suggestion: "The area may be covered by clouds or have no data for this time period",
+        dataset: dataset,
+        requestedParams: { year, month, period },
+        stats: compositeStats
+      });
+    }
 
     const visParams = {
       min: datasetConfig.min,
@@ -181,10 +265,20 @@ export default async (req, res) => {
       });
     });
 
+    console.log(`✅ Successfully created tile URL for ${dataset} with ${collectionSize} images`);
+
     res.json({ 
       tile_url: mapId.urlFormat,
       dataset: dataset,
       description: datasetConfig.description,
+      dataInfo: {
+        imageCount: collectionSize,
+        dateRange: dateRange ? {
+          first: new Date(dateRange[0]).toISOString().split('T')[0],
+          last: new Date(dateRange[dateRange.length - 1]).toISOString().split('T')[0]
+        } : null,
+        hasValidData: hasData
+      },
       parameters: {
         year,
         month,
@@ -194,6 +288,7 @@ export default async (req, res) => {
       }
     });
   } catch (e) {
+    console.error('❌ Error in tiles API:', e);
     res.status(500).json({ error: e.message });
   }
 }; 
