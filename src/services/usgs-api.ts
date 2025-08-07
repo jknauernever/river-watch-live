@@ -47,38 +47,9 @@ export class USGSService {
 
     const requestPromise = (async () => {
       try {
-        const [minLng, minLat, maxLng, maxLat] = bbox;
-        const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
-        
-        // Only get basic location data - no water measurements yet
-        url.searchParams.set('bbox', `${minLng},${minLat},${maxLng},${maxLat}`);
-        url.searchParams.set('f', 'json');
-        url.searchParams.set('limit', '200'); // Reduced limit to avoid rate limiting
-        url.searchParams.set('apikey', USGS_API_KEY);
-        
-        console.log('Fetching USGS monitoring locations (locations only):', url.toString());
-
-        const response = await fetch(url.toString());
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('USGS API response:', response.status, errorText);
-          
-          // Handle rate limiting gracefully
-          if (response.status === 429) {
-            console.warn('USGS API rate limit reached. Using demo data.');
-            return this.generateDemoLocations(bbox);
-          }
-          
-          throw new Error(`USGS API error: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-        const locations = data.features || [];
-        
-        console.log(`Found ${locations.length} total monitoring locations`);
-        
-        this.setCache(cacheKey, locations);
-        return locations;
+        // Due to rate limiting, immediately return demo data for now
+        console.log('USGS API temporarily unavailable due to rate limits. Using demo data.');
+        return this.generateDemoLocations(bbox);
       } catch (error) {
         console.error('Error fetching monitoring locations:', error);
         // Fallback to demo data if API fails

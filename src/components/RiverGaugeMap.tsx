@@ -29,6 +29,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [basicGaugeLocations, setBasicGaugeLocations] = useState<any[]>([]);
   const [selectedStation, setSelectedStation] = useState<GaugeStation | null>(null);
   const [showRiverData, setShowRiverData] = useState(false); // Start with just locations
+  const [mapError, setMapError] = useState<string | null>(null);
   const { toast } = useToast();
 
   const loadGoogleMapsScript = useCallback(() => {
@@ -56,7 +57,22 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         resolve(window.google);
       };
       
-      script.onerror = () => reject(new Error('Failed to load Google Maps'));
+      // Enhanced error handling
+      script.onerror = (event) => {
+        console.error('Google Maps script failed to load:', event);
+        setMapError('Failed to load Google Maps script');
+        reject(new Error('Failed to load Google Maps'));
+      };
+      
+      // Listen for quota errors at window level
+      window.addEventListener('error', (event) => {
+        if (event.message && event.message.includes('OverQuotaMapError')) {
+          console.error('Google Maps quota exceeded');
+          setMapError('Google Maps quota exceeded');
+          reject(new Error('Google Maps quota exceeded'));
+        }
+      });
+      
       document.head.appendChild(script);
     });
   }, [apiKey]);
@@ -227,6 +243,12 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   }, [createMarker, toast, showRiverData, basicGaugeLocations, isLoadingData]);
 
   const initializeMap = useCallback(async () => {
+    // Don't initialize if there's already a map error
+    if (mapError) {
+      console.log('Skipping map initialization due to previous error:', mapError);
+      return;
+    }
+    
     try {
       console.log('Initializing Google Maps...');
       await loadGoogleMapsScript();
@@ -244,71 +266,109 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       
       console.log('Creating map instance...');
       
-      const map = new google.maps.Map(mapRef.current, {
-        zoom: 9,
-        center: { lat: 47.6062, lng: -122.3321 }, // Puget Sound, Washington
-        mapTypeId: 'terrain',
-        styles: [
-          {
-            featureType: 'water',
-            elementType: 'geometry',
-            stylers: [{ color: '#e9f3ff' }]
-          },
-          {
-            featureType: 'water',
-            elementType: 'labels.text.fill',
-            stylers: [{ color: '#1a73e8' }]
-          }
-        ]
-      });
+      let map;
+      try {
+        map = new google.maps.Map(mapRef.current, {
+          zoom: 9,
+          center: { lat: 47.6062, lng: -122.3321 }, // Puget Sound, Washington
+          mapTypeId: 'terrain',
+          styles: [
+            {
+              featureType: 'water',
+              elementType: 'geometry',
+              stylers: [{ color: '#e9f3ff' }]
+            },
+            {
+              featureType: 'water',
+              elementType: 'labels.text.fill',
+              stylers: [{ color: '#1a73e8' }]
+            }
+          ]
+        });
+      } catch (mapError) {
+        console.error('Map creation failed:', mapError);
+        if (mapError instanceof Error && mapError.message.includes('quota')) {
+          setMapError('Google Maps quota exceeded');
+          toast({
+            title: "Google Maps Quota Exceeded",
+            description: "The API key has reached its usage limit. Please try again later.",
+            variant: "destructive",
+          });
+        } else {
+          setMapError('Failed to create map');
+          toast({
+            title: "Map Creation Failed",
+            description: "Unable to create the map. Please check your API key.",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
 
       mapInstanceRef.current = map;
 
-      // Add search box (using alternative to SearchBox since it's being deprecated)
-      const autocomplete = new google.maps.places.Autocomplete(
-        document.getElementById('search-input') as HTMLInputElement
-      );
+      // Check for map errors
+      map.addListener('tilesloaded', () => {
+        // Map loaded successfully, now set up search and listeners
+        try {
+          const autocomplete = new google.maps.places.Autocomplete(
+            document.getElementById('search-input') as HTMLInputElement
+          );
 
-      autocomplete.addListener('place_changed', () => {
-        const place = autocomplete.getPlace();
-        if (place.geometry?.location) {
-          map.setCenter(place.geometry.location);
-          map.setZoom(10);
+          autocomplete.addListener('place_changed', () => {
+            const place = autocomplete.getPlace();
+            if (place.geometry?.location) {
+              map.setCenter(place.geometry.location);
+              map.setZoom(10);
+            }
+          });
+        } catch (error) {
+          console.warn('Search functionality unavailable:', error);
         }
-      });
 
-      // Load initial gauge locations (not water data yet)
-      google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
-        setTimeout(() => loadGaugeLocations(map), 500); // Small delay to ensure map is ready
-      });
+        // Load initial gauge locations (not water data yet) - only once
+        google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
+          setTimeout(() => loadGaugeLocations(map), 1000);
+        });
 
-      // Reload locations when map moves - use longer debounce and track if already processed
-      let timeoutId: NodeJS.Timeout;
-      let lastBounds: string | null = null;
-      
-      map.addListener('bounds_changed', () => {
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => {
-          const currentBounds = map.getBounds();
-          if (!currentBounds || isLoading) return;
-          
-          const boundsKey = `${currentBounds.getNorthEast().lat().toFixed(3)}-${currentBounds.getSouthWest().lat().toFixed(3)}`;
-          
-          // Skip if same bounds 
-          if (boundsKey === lastBounds) return;
-          
-          lastBounds = boundsKey;
-          loadGaugeLocations(map);
-        }, 5000); // Increased to 5 seconds to prevent excessive calls
+        // Reload locations when map moves - much more conservative approach
+        let timeoutId: NodeJS.Timeout;
+        let lastBounds: string | null = null;
+        
+        map.addListener('bounds_changed', () => {
+          clearTimeout(timeoutId);
+          timeoutId = setTimeout(() => {
+            const currentBounds = map.getBounds();
+            if (!currentBounds || isLoading) return;
+            
+            const boundsKey = `${currentBounds.getNorthEast().lat().toFixed(2)}-${currentBounds.getSouthWest().lat().toFixed(2)}`;
+            
+            // Skip if same bounds 
+            if (boundsKey === lastBounds) return;
+            
+            lastBounds = boundsKey;
+            loadGaugeLocations(map);
+          }, 8000); // 8 seconds to really minimize calls
+        });
       });
 
     } catch (error) {
       console.error('Failed to initialize map:', error);
-      toast({
-        title: "Map Loading Error",
-        description: "Failed to load Google Maps. Please check your API key.",
-        variant: "destructive",
-      });
+      
+      // Handle quota errors specifically
+      if (error instanceof Error && error.message.includes('quota')) {
+        toast({
+          title: "Google Maps Quota Exceeded",
+          description: "The Google Maps API key has reached its usage limit. Please try again later.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Map Loading Error", 
+          description: "Failed to load Google Maps. Please check your API key.",
+          variant: "destructive",
+        });
+      }
     }
   }, [loadGoogleMapsScript, loadGaugeLocations, toast, isLoading]);
 
@@ -354,6 +414,37 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       initializeMap();
     }
   }, [apiKey, initializeMap]);
+
+  
+  // Show error state if map failed to load
+  if (mapError) {
+    return (
+      <div className="relative w-full h-screen bg-background flex items-center justify-center">
+        <Card className="max-w-md mx-4">
+          <CardContent className="p-6 text-center">
+            <div className="text-4xl mb-4">🗺️</div>
+            <h2 className="text-xl font-semibold mb-2">Map Unavailable</h2>
+            <p className="text-muted-foreground mb-4">
+              {mapError.includes('quota') 
+                ? 'The Google Maps API key has reached its usage limit. Please try again later or contact support.'
+                : 'Unable to load the map. Please check your internet connection and try again.'
+              }
+            </p>
+            <Button 
+              onClick={() => {
+                setMapError(null);
+                window.location.reload();
+              }}
+              variant="outline"
+            >
+              <RotateCcw className="w-4 h-4 mr-2" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="relative w-full h-screen bg-background">

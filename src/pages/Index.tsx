@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react';
 import { GoogleMapsLoader } from '@/components/GoogleMapsLoader';
 import { RiverGaugeMap } from '@/components/RiverGaugeMap';
+import { OfflineMapFallback } from '@/components/OfflineMapFallback';
 
 const Index = () => {
   const [apiKey, setApiKey] = useState<string>('');
+  const [useOfflineMode, setUseOfflineMode] = useState(false);
 
   useEffect(() => {
+    // Force offline mode due to current API quota limitations
+    setUseOfflineMode(true);
+    
     // Check if API key is already stored
     const stored = localStorage.getItem('google-maps-api-key');
     if (stored) {
@@ -18,15 +23,10 @@ const Index = () => {
     }
   }, []);
 
+  // Always use offline mode for now due to API quota issues
   return (
     <div className="min-h-screen bg-background">
-      {!apiKey ? (
-        <div className="min-h-screen flex items-center justify-center p-4">
-          <GoogleMapsLoader onApiKeySet={setApiKey} />
-        </div>
-      ) : (
-        <RiverGaugeMap apiKey={apiKey} />
-      )}
+      <OfflineMapFallback />
     </div>
   );
 };
