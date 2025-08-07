@@ -36,7 +36,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       }
 
       const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&loading=async`;
       script.async = true;
       script.defer = true;
       script.onload = () => resolve(window.google);
@@ -163,16 +163,13 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
       mapInstanceRef.current = map;
 
-      // Add search box
-      const searchBox = new google.maps.places.SearchBox(
+      // Add search box (using alternative to SearchBox since it's being deprecated)
+      const autocomplete = new google.maps.places.Autocomplete(
         document.getElementById('search-input') as HTMLInputElement
       );
 
-      searchBox.addListener('places_changed', () => {
-        const places = searchBox.getPlaces();
-        if (places.length === 0) return;
-
-        const place = places[0];
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
         if (place.geometry?.location) {
           map.setCenter(place.geometry.location);
           map.setZoom(10);

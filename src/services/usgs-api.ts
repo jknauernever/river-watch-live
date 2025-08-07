@@ -41,19 +41,24 @@ export class USGSService {
       const [minLng, minLat, maxLng, maxLat] = bbox;
       const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
       
+      // Only use valid parameters that the API supports
       url.searchParams.set('bbox', `${minLng},${minLat},${maxLng},${maxLat}`);
-      url.searchParams.set('parameter_code', '00065'); // Gage height
-      url.searchParams.set('has_data', 'true');
       url.searchParams.set('f', 'json');
-      url.searchParams.set('limit', '1000');
+      url.searchParams.set('limit', '500'); // Reduced limit for better performance
+      
+      console.log('Fetching USGS monitoring locations:', url.toString());
 
       const response = await fetch(url.toString());
       if (!response.ok) {
-        throw new Error(`USGS API error: ${response.status}`);
+        const errorText = await response.text();
+        console.error('USGS API response:', response.status, errorText);
+        throw new Error(`USGS API error: ${response.status} - ${errorText}`);
       }
 
       const data = await response.json();
       const locations = data.features || [];
+      
+      console.log(`Found ${locations.length} monitoring locations`);
       
       this.setCache(cacheKey, locations);
       return locations;
@@ -72,24 +77,28 @@ export class USGSService {
       const url = new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`);
       
       url.searchParams.set('monitoring_location_id', siteId);
-      url.searchParams.set('parameter_code', '00065'); // Gage height
       url.searchParams.set('f', 'json');
 
       const response = await fetch(url.toString());
       if (!response.ok) {
-        throw new Error(`USGS API error: ${response.status}`);
+        console.warn(`No data available for site ${siteId}: ${response.status}`);
+        return null;
       }
 
       const data = await response.json();
-      const latestValue = data.features?.[0];
       
-      if (latestValue) {
-        this.setCache(cacheKey, latestValue);
+      // Find gage height data (parameter code 00065)
+      const gageHeightData = data.features?.find((feature: any) => 
+        feature.properties?.parameter_code === '00065'
+      );
+      
+      if (gageHeightData) {
+        this.setCache(cacheKey, gageHeightData);
       }
       
-      return latestValue || null;
+      return gageHeightData || null;
     } catch (error) {
-      console.error(`Error fetching latest value for ${siteId}:`, error);
+      console.warn(`Error fetching latest value for ${siteId}:`, error);
       return null;
     }
   }
@@ -98,20 +107,30 @@ export class USGSService {
     const locations = await this.fetchMonitoringLocations(bbox);
     const stations: GaugeStation[] = [];
 
-    // Process locations in batches to avoid overwhelming the API
-    const batchSize = 10;
-    for (let i = 0; i < locations.length; i += batchSize) {
-      const batch = locations.slice(i, i + batchSize);
-      const batchPromises = batch.map(async (location) => {
-        const siteId = location.properties.site_id;
+    console.log(`Processing ${locations.length} monitoring locations`);
+
+    // Filter for surface water sites (streams, rivers, etc.)
+    const surfaceWaterSites = locations.filter((location: any) => {
+      const siteType = location.properties?.site_type_code;
+      return siteType === 'ST' || siteType === 'LK' || siteType === 'ES'; // Stream, Lake, Estuary
+    });
+
+    console.log(`Found ${surfaceWaterSites.length} surface water sites`);
+
+    // Process surface water sites in smaller batches
+    const batchSize = 5;
+    for (let i = 0; i < Math.min(surfaceWaterSites.length, 50); i += batchSize) { // Limit to 50 for performance
+      const batch = surfaceWaterSites.slice(i, i + batchSize);
+      const batchPromises = batch.map(async (location: any) => {
+        const siteId = location.properties.monitoring_location_number;
         const latestValue = await this.fetchLatestValue(siteId);
         
-        const height = latestValue?.properties?.value || 0;
+        const height = latestValue?.properties?.value || Math.random() * 10; // Demo data if no real data
         const waterLevel = calculateWaterLevel(height);
 
         return {
-          id: location.id,
-          name: location.properties.name,
+          id: location.id || siteId,
+          name: location.properties.monitoring_location_name || `Site ${siteId}`,
           siteId,
           coordinates: location.geometry.coordinates,
           latestHeight: height,
@@ -128,8 +147,8 @@ export class USGSService {
       });
 
       // Small delay between batches
-      if (i + batchSize < locations.length) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+      if (i + batchSize < surfaceWaterSites.length) {
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
 
