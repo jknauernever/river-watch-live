@@ -1,10 +1,10 @@
-import { RiverGaugeMap } from "@/components/RiverGaugeMap";
+import { MapInterface } from "@/components/MapInterface";
 
 const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto p-4">
-        <RiverGaugeMap apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''} />
+        <MapInterface />
       </div>
     </div>
   );
