@@ -48,14 +48,20 @@ export class USGSService {
     const requestPromise = (async () => {
       try {
         const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+        // Try different parameter format based on OGC API standards
         url.searchParams.set('bbox', bbox.join(','));
         url.searchParams.set('f', 'json');
         url.searchParams.set('limit', '500');
-        url.searchParams.set('apikey', USGS_API_KEY);
+        // Remove API key to test if that's causing the issue
+        // url.searchParams.set('apikey', USGS_API_KEY);
 
+        console.log('Making USGS API request to:', url.toString());
         const response = await fetch(url.toString());
+        
         if (!response.ok) {
-          console.warn(`USGS API returned ${response.status}, falling back to demo data`);
+          console.warn(`USGS API returned ${response.status}: ${response.statusText}`);
+          const errorText = await response.text();
+          console.warn('Error response:', errorText);
           return this.generateDemoLocations(bbox);
         }
 
