@@ -98,14 +98,25 @@ All colors MUST be HSL.
     --border: 150 15% 20%;
     --input: 150 15% 20%;
     --ring: 150 50% 60%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer components {
+  /* Water level color classes for River Watch Live */
+  .bg-water-low {
+    background-color: #4285f4; /* Blue */
+  }
+  
+  .bg-water-medium {
+    background-color: #34a853; /* Green */
+  }
+  
+  .bg-water-high {
+    background-color: #ea4335; /* Red */
+  }
+  
+  .bg-water-critical {
+    background-color: #ff6d01; /* Orange-red */
   }
 }
 
