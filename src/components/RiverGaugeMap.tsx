@@ -51,7 +51,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     }
   }, [loadPlacesLibrary, map]);
 
-  // Load gauge locations only once when map bounds change
+  // Load gauge locations (progressive, abortable) when map bounds change
   const loadGaugeLocations = useCallback(async () => {
     if (!map || isLoading) return;
 
@@ -77,10 +77,30 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
     setIsLoading(true);
     setFetchProgress({ fetched: 0, total: undefined });
+    // Cancel any in-flight request
+    (loadGaugeLocations as any).abortController?.abort?.();
+    const abortController = new AbortController();
+    (loadGaugeLocations as any).abortController = abortController;
     console.log('Starting gauge location load for bbox:', bbox);
     try {
       const locations = await usgsService.getGaugeLocationsOnly(bbox, {
         onProgress: (fetched, total) => setFetchProgress({ fetched, total }),
+        onPage: (features) => {
+          const valid = features.map((f: any) => ({
+            id: f.id || f.properties?.monitoring_location_number,
+            name: f.properties?.monitoring_location_name || `Site ${f.properties?.monitoring_location_number}`,
+            siteId: f.properties?.monitoring_location_number,
+            coordinates: (f.geometry?.coordinates || f.properties?.coordinates) as [number, number],
+            siteType: f.properties?.site_type_cd || f.properties?.site_type_code || 'ST',
+            isDemo: false,
+          })).filter((l: any) => Array.isArray(l.coordinates) && l.coordinates.length === 2);
+          setBasicGaugeLocations(prev => {
+            const map = new Map(prev.map(p => [p.siteId, p]));
+            valid.forEach(v => map.set(v.siteId, v));
+            return Array.from(map.values());
+          });
+        },
+        signal: abortController.signal,
       });
       console.log('Received locations:', locations);
       
@@ -105,6 +125,9 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     } finally {
       setIsLoading(false);
       setFetchProgress(null);
+      if ((loadGaugeLocations as any).abortController === abortController) {
+        (loadGaugeLocations as any).abortController = null;
+      }
     }
   }, [map, isLoading]);
 

@@ -36,7 +36,11 @@ export class USGSService {
 
   async fetchMonitoringLocations(
     bbox: [number, number, number, number],
-    options?: { onProgress?: (fetched: number, total?: number) => void }
+    options?: {
+      onProgress?: (fetched: number, total?: number) => void;
+      onPage?: (features: USGSMonitoringLocation[], pageIndex: number) => void;
+      signal?: AbortSignal;
+    }
   ): Promise<USGSMonitoringLocation[]> {
     const cacheKey = `locations-${bbox.join(',')}`;
     const cached = this.getCached<USGSMonitoringLocation[]>(cacheKey);
@@ -64,9 +68,13 @@ export class USGSService {
         const maxPages = 10; // hard safety cap to avoid runaway loops
 
         while (nextUrl && pageCount < maxPages) {
+          if (options?.signal?.aborted) {
+            console.warn('Monitoring locations fetch aborted before request');
+            break;
+          }
           pageCount += 1;
           console.log(`Fetching monitoring-locations page ${pageCount}:`, nextUrl);
-          const resp = await fetch(nextUrl);
+          const resp = await fetch(nextUrl, { signal: options?.signal });
           if (!resp.ok) {
             const errorText = await resp.text();
             console.warn(`USGS API returned ${resp.status}: ${resp.statusText}`);
@@ -77,6 +85,13 @@ export class USGSService {
           const page = await resp.json();
           const features: USGSMonitoringLocation[] = page.features || [];
           aggregated.push(...features);
+
+          // Provide page to caller for progressive rendering
+          try {
+            options?.onPage?.(features, pageCount - 1);
+          } catch (_) {
+            // ignore page callback errors
+          }
 
           // Emit progress after each page
           try {
@@ -155,7 +170,11 @@ export class USGSService {
   }
   async getGaugeLocationsOnly(
     bbox: [number, number, number, number],
-    options?: { onProgress?: (fetched: number, total?: number) => void }
+    options?: {
+      onProgress?: (fetched: number, total?: number) => void;
+      onPage?: (features: USGSMonitoringLocation[], pageIndex: number) => void;
+      signal?: AbortSignal;
+    }
   ): Promise<{ 
     id: string; 
     name: string; 

@@ -24,16 +24,18 @@ export const GaugeMarkers = ({
   showRiverData, 
   onStationSelect 
 }: GaugeMarkersProps) => {
-  const markersRef = useRef<google.maps.Marker[]>([]);
+  const markersRef = useRef<(google.maps.Marker | any)[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+  const markerMapRef = useRef<Map<string, google.maps.Marker | any>>(new Map());
 
   const clearMarkers = useCallback(() => {
     console.log('Clearing markers:', markersRef.current.length);
-    markersRef.current.forEach(marker => marker.setMap(null));
+    markersRef.current.forEach(marker => (marker as any).setMap(null));
     markersRef.current = [];
     if (infoWindowRef.current) {
       infoWindowRef.current.close();
     }
+    markerMapRef.current.clear();
   }, []);
 
   const createBasicMarker = useCallback((location: BasicLocation) => {
@@ -175,7 +177,7 @@ export const GaugeMarkers = ({
     return marker;
   }, [map, onStationSelect]);
 
-  // Update markers when data changes
+  // Update markers when data changes using diffing and batching
   useEffect(() => {
     if (!map) {
       console.log('Map not available, skipping marker update');
@@ -188,35 +190,57 @@ export const GaugeMarkers = ({
       stationsCount: stations.length
     });
 
-    clearMarkers();
+    const supportsAdvanced = !!(google.maps as any).marker?.AdvancedMarkerElement;
+    const upsert = (id: string, lat: number, lng: number, title: string, color?: string) => {
+      const existing = markerMapRef.current.get(id) as any;
+      if (existing) {
+        existing.position = { lat, lng };
+        if (!supportsAdvanced && color && existing.setIcon) {
+          existing.setIcon({
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: color,
+            fillOpacity: 0.8,
+            strokeColor: '#ffffff',
+            strokeWeight: 2,
+          });
+        }
+        return existing;
+      }
+      const marker = supportsAdvanced
+        ? new (google.maps as any).marker.AdvancedMarkerElement({ position: { lat, lng }, map, title })
+        : new google.maps.Marker({ position: { lat, lng }, map, title });
+      markerMapRef.current.set(id, marker);
+      return marker;
+    };
 
-    if (showRiverData && stations.length > 0) {
-      // Show enhanced markers with water data
-      console.log('Creating station markers:', stations.length);
-      const newMarkers = stations.map(station => createStationMarker(station)).filter(Boolean);
-      markersRef.current = newMarkers;
-      console.log('Created station markers:', newMarkers.length);
-      
-      // Verify markers are on the map
-      newMarkers.forEach((marker, index) => {
-        if (marker && marker.getMap() !== map) {
-          console.warn(`Station marker ${index} not properly attached to map`);
-        }
-      });
-    } else if (basicLocations.length > 0) {
-      // Show basic location markers
-      console.log('Creating basic location markers:', basicLocations.length);
-      const newMarkers = basicLocations.map(location => createBasicMarker(location)).filter(Boolean);
-      markersRef.current = newMarkers;
-      console.log('Created basic markers:', newMarkers.length);
-      
-      // Verify markers are on the map
-      newMarkers.forEach((marker, index) => {
-        if (marker && marker.getMap() !== map) {
-          console.warn(`Basic marker ${index} not properly attached to map`);
-        }
-      });
-    }
+    const targets: Array<{ id: string; lat: number; lng: number; title: string; color?: string }> = showRiverData
+      ? stations.map(s => ({ id: s.id, lat: s.coordinates[1], lng: s.coordinates[0], title: s.name, color: s.waterLevel.color }))
+      : basicLocations.map(l => ({ id: l.siteId, lat: l.coordinates[1], lng: l.coordinates[0], title: l.name }));
+
+    const nextIds = new Set(targets.map(t => t.id));
+
+    // Remove markers that are no longer needed
+    markerMapRef.current.forEach((marker, id) => {
+      if (!nextIds.has(id)) {
+        (marker as any).setMap(null);
+        markerMapRef.current.delete(id);
+      }
+    });
+
+    // Batch additions/updates
+    const batchSize = 200;
+    let index = 0;
+    const process = () => {
+      const end = Math.min(index + batchSize, targets.length);
+      for (; index < end; index++) {
+        const t = targets[index];
+        const m = upsert(t.id, t.lat, t.lng, t.title, t.color);
+        if ((m as any).setMap) (m as any).setMap(map);
+      }
+      if (index < targets.length) requestAnimationFrame(process);
+    };
+    process();
   }, [map, basicLocations, stations, showRiverData, createBasicMarker, createStationMarker, clearMarkers]);
 
   // Cleanup on unmount
