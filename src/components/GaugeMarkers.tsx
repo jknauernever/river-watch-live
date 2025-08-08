@@ -1,6 +1,7 @@
 /// <reference types="google.maps" />
 import { useEffect, useRef, useCallback } from 'react';
 import { GaugeStation } from '@/types/usgs';
+import { MarkerClusterer } from '@googlemaps/markerclusterer';
 
 interface BasicLocation {
   siteId: string;
@@ -27,6 +28,7 @@ export const GaugeMarkers = ({
   const markersRef = useRef<(google.maps.Marker | any)[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
   const markerMapRef = useRef<Map<string, google.maps.Marker | any>>(new Map());
+  const clustererRef = useRef<MarkerClusterer | null>(null);
 
   const clearMarkers = useCallback(() => {
     console.log('Clearing markers:', markersRef.current.length);
@@ -36,6 +38,9 @@ export const GaugeMarkers = ({
       infoWindowRef.current.close();
     }
     markerMapRef.current.clear();
+    if (clustererRef.current) {
+      clustererRef.current.clearMarkers();
+    }
   }, []);
 
   const createBasicMarker = useCallback((location: BasicLocation) => {
@@ -258,6 +263,11 @@ export const GaugeMarkers = ({
       }
     });
 
+    // Ensure a clusterer exists
+    if (!clustererRef.current && map) {
+      clustererRef.current = new MarkerClusterer({ map });
+    }
+
     // Batch additions/updates
     const batchSize = 200;
     let index = 0;
@@ -266,7 +276,13 @@ export const GaugeMarkers = ({
       for (; index < end; index++) {
         const t = targets[index];
         const m = upsert(t.id, t.lat, t.lng, t.title, t.color);
-        if ((m as any).setMap) (m as any).setMap(map);
+        if ((m as any).setMap) (m as any).setMap(null);
+        // add to clusterer (which attaches to map)
+        if (clustererRef.current && (m as any).position) {
+          clustererRef.current.addMarker(m as any);
+        } else if ((m as any).setMap) {
+          (m as any).setMap(map);
+        }
       }
       if (index < targets.length) requestAnimationFrame(process);
     };
