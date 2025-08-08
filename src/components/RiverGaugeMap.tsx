@@ -57,12 +57,22 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
   // Load enhanced station data when requested
   const loadStations = useCallback(async () => {
-    if (!showRiverData || basicGaugeLocations.length === 0 || isLoadingData) return;
+    if (!showRiverData || basicGaugeLocations.length === 0 || isLoadingData || !map) return;
+    
+    // Get current map bounds for bulk API optimization
+    const bounds = map.getBounds();
+    if (!bounds) return;
+
+    const ne = bounds.getNorthEast();
+    const sw = bounds.getSouthWest();
+    const bbox: [number, number, number, number] = [
+      sw.lng(), sw.lat(), ne.lng(), ne.lat()
+    ];
     
     setIsLoadingData(true);
     console.log('Loading water data for stations:', basicGaugeLocations);
     try {
-      const enhancedStations = await usgsService.enhanceGaugeStationsWithData(basicGaugeLocations);
+      const enhancedStations = await usgsService.enhanceGaugeStationsWithData(basicGaugeLocations, bbox);
       console.log('Enhanced stations received:', enhancedStations);
       setStations(enhancedStations);
 
@@ -80,7 +90,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     } finally {
       setIsLoadingData(false);
     }
-  }, [showRiverData, basicGaugeLocations, isLoadingData, toast]);
+  }, [showRiverData, basicGaugeLocations, isLoadingData, map, toast]);
 
   // Set up map listeners once when map is loaded
   useEffect(() => {
