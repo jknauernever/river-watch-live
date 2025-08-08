@@ -18,6 +18,7 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scriptLoadedRef = useRef(false);
+  const placesLoadedRef = useRef(false);
 
   const loadScript = useCallback(() => {
     return new Promise((resolve, reject) => {
@@ -48,7 +49,7 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
       }
 
       const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&loading=async&callback=initGoogleMaps`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&v=weekly&loading=async&callback=initGoogleMaps`;
       script.async = true;
       script.defer = true;
       
@@ -112,6 +113,30 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
       throw err;
     }
   }, [apiKey, containerId, loadScript]);
+
+  const loadPlacesLibrary = useCallback(async () => {
+    if (placesLoadedRef.current) return;
+    const { google } = window as any;
+    if (google?.maps?.places) { placesLoadedRef.current = true; return; }
+    try {
+      if (typeof google?.maps?.importLibrary === 'function') {
+        await google.maps.importLibrary('places');
+      } else {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&v=weekly&loading=async`;
+          script.async = true;
+          script.defer = true;
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error('Failed to load Places library'));
+          document.head.appendChild(script);
+        });
+      }
+      placesLoadedRef.current = true;
+    } catch (e) {
+      console.warn('Failed to load Places library:', e);
+    }
+  }, [apiKey]);
 
   const getMap = useCallback(() => {
     return mapInstanceRef.current;

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { GoogleMapsLoader } from '@/components/GoogleMapsLoader';
-import { RiverGaugeMap } from '@/components/RiverGaugeMap';
+const RiverGaugeMap = lazy(() => import('@/components/RiverGaugeMap').then(m => ({ default: m.RiverGaugeMap })));
 
 const Index = () => {
   const [apiKey, setApiKey] = useState<string>('');

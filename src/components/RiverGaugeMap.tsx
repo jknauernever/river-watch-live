@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { GaugeStation } from '@/types/usgs';
 import { usgsService } from '@/services/usgs-api';
 import { useGoogleMaps } from '@/hooks/useGoogleMaps';
@@ -17,7 +17,7 @@ interface RiverGaugeMapProps {
 export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   console.log('NEW RiverGaugeMap rendering with apiKey:', apiKey ? 'present' : 'missing');
   
-  const { map, isLoaded, error: mapError, resetView } = useGoogleMaps({ apiKey });
+  const { map, isLoaded, error: mapError, resetView, loadPlacesLibrary } = useGoogleMaps({ apiKey });
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [stations, setStations] = useState<GaugeStation[]>([]);
@@ -26,6 +26,28 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [showRiverData, setShowRiverData] = useState(false);
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
   const { toast } = useToast();
+  const searchInitializedRef = useRef(false);
+
+  const handleSearchFocus = useCallback(async () => {
+    if (searchInitializedRef.current) return;
+    try {
+      await loadPlacesLibrary?.();
+      const input = document.getElementById('search-input') as HTMLInputElement | null;
+      if (!input || !window.google?.maps?.places?.Autocomplete) return;
+      const autocomplete = new window.google.maps.places.Autocomplete(input);
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (place.geometry?.location && map) {
+          map.setCenter(place.geometry.location);
+          map.setZoom(10);
+        }
+      });
+      searchInitializedRef.current = true;
+      console.log('Search Autocomplete initialized on demand');
+    } catch (err) {
+      console.warn('Deferred search initialization failed:', err);
+    }
+  }, [loadPlacesLibrary, map]);
 
   // Load gauge locations only once when map bounds change
   const loadGaugeLocations = useCallback(async () => {
@@ -96,38 +118,14 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   useEffect(() => {
     if (!map || !isLoaded) return;
 
-    let timeoutId: NodeJS.Timeout;
-    let lastBounds: string | null = null;
-
-    // Set up search functionality
-    try {
-      const autocomplete = new window.google.maps.places.Autocomplete(
-        document.getElementById('search-input') as HTMLInputElement
-      );
-
-      autocomplete.addListener('place_changed', () => {
-        const place = autocomplete.getPlace();
-        if (place.geometry?.location) {
-          map.setCenter(place.geometry.location);
-          map.setZoom(10);
-        }
-      });
-    } catch (error) {
-      console.warn('Search functionality unavailable:', error);
-    }
-
-    // Load initial gauge locations - only once
-    window.google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
-      setTimeout(() => loadGaugeLocations(), 1000);
+    const onceIdle = window.google.maps.event.addListenerOnce(map, 'idle', () => {
+      loadGaugeLocations();
     });
 
-    // Note: Removed automatic bounds_changed listener to prevent markers from moving during zoom/pan
-    // Users can manually refresh if they want to see gauges in new areas
-
     return () => {
-      clearTimeout(timeoutId);
+      window.google.maps.event.removeListener(onceIdle);
     };
-  }, [map, isLoaded, loadGaugeLocations, isLoading]);
+  }, [map, isLoaded, loadGaugeLocations]);
 
   const toggleRiverData = useCallback(() => {
     setShowRiverData(prev => {
@@ -193,6 +191,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
               id="search-input"
               type="text"
               placeholder="Search for a location..."
+              onFocus={handleSearchFocus}
               className="w-full border-0 outline-none bg-transparent text-foreground placeholder:text-muted-foreground"
             />
           </CardContent>
