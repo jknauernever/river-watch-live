@@ -129,8 +129,14 @@ export class USGSService {
     siteId: string; 
     coordinates: [number, number];
     siteType: string;
+    isDemo: boolean;
   }[]> {
     const locations = await this.fetchMonitoringLocations(bbox);
+    
+    // Check if any location has a demo site ID to determine if we're using demo data
+    const isUsingDemoData = locations.some((location: any) => 
+      location.id?.startsWith('DEMO') || location.properties?.site_id?.startsWith('DEMO')
+    );
     
     // Filter for surface water sites and return basic info only
     const surfaceWaterSites = locations.filter((location: any) => {
@@ -143,7 +149,8 @@ export class USGSService {
       name: location.properties.monitoring_location_name || `Site ${location.properties.monitoring_location_number}`,
       siteId: location.properties.monitoring_location_number,
       coordinates: location.geometry.coordinates,
-      siteType: location.properties.site_type_code
+      siteType: location.properties.site_type_code,
+      isDemo: isUsingDemoData
     }));
   }
 

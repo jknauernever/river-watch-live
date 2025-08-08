@@ -24,6 +24,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [basicGaugeLocations, setBasicGaugeLocations] = useState<any[]>([]);
   const [selectedStation, setSelectedStation] = useState<GaugeStation | null>(null);
   const [showRiverData, setShowRiverData] = useState(false);
+  const [isUsingDemoData, setIsUsingDemoData] = useState(false);
   const { toast } = useToast();
 
   // Load gauge locations only once when map bounds change
@@ -43,6 +44,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     try {
       const locations = await usgsService.getGaugeLocationsOnly(bbox);
       setBasicGaugeLocations(locations);
+      setIsUsingDemoData(locations.length > 0 && locations[0].isDemo);
       console.log(`Loaded ${locations.length} gauge locations`);
     } catch (error) {
       console.error('Error loading gauge locations:', error);
@@ -197,6 +199,15 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           Reset
         </Button>
       </div>
+
+      {/* Demo Data Warning */}
+      {isUsingDemoData && (
+        <div className="absolute top-4 right-4 z-20">
+          <div className="bg-red-600 text-white px-3 py-2 rounded-md shadow-lg font-bold text-sm">
+            Warning: Demo Data
+          </div>
+        </div>
+      )}
 
       {/* Loading indicator */}
       {isLoadingData && (
