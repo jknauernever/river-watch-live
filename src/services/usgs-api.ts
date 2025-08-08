@@ -147,14 +147,31 @@ export class USGSService {
       return siteType === 'ST' || siteType === 'LK' || siteType === 'ES' || !siteType; // Include sites without type codes
     });
 
-    return surfaceWaterSites.map((location: any) => ({
-      id: location.id || location.properties.monitoring_location_number,
-      name: location.properties.monitoring_location_name || `Site ${location.properties.monitoring_location_number}`,
-      siteId: location.properties.monitoring_location_number,
-      coordinates: location.geometry.coordinates,
-      siteType: location.properties.site_type_code,
-      isDemo: isUsingDemoData
-    }));
+    return surfaceWaterSites.map((location: any) => {
+      const rawCoords: [number, number] = (location.geometry?.coordinates || location.properties?.coordinates) as [number, number];
+      const [minLng, minLat, maxLng, maxLat] = bbox;
+
+      // Normalize to [lng, lat] based on bbox containment
+      let lng = rawCoords?.[0];
+      let lat = rawCoords?.[1];
+
+      const isInBbox = (lo: number, la: number) => lo >= minLng && lo <= maxLng && la >= minLat && la <= maxLat;
+
+      if (!isInBbox(lng, lat) && isInBbox(lat, lng)) {
+        // Coordinates appear reversed as [lat, lng]; swap
+        [lng, lat] = [lat, lng];
+        console.warn('Swapped misordered coordinates from [lat,lng] to [lng,lat] for site:', location.id || location.properties?.monitoring_location_number);
+      }
+
+      return {
+        id: location.id || location.properties.monitoring_location_number,
+        name: location.properties.monitoring_location_name || `Site ${location.properties.monitoring_location_number}`,
+        siteId: location.properties.monitoring_location_number,
+        coordinates: [lng, lat],
+        siteType: location.properties.site_type_cd || location.properties.site_type_code,
+        isDemo: isUsingDemoData
+      };
+    });
   }
 
   async fetchLatestValue(siteId: string): Promise<USGSLatestValue | null> {
