@@ -147,31 +147,75 @@ export class USGSService {
       return siteType === 'ST' || siteType === 'LK' || siteType === 'ES' || !siteType; // Include sites without type codes
     });
 
+    console.log(`Processing ${surfaceWaterSites.length} surface water sites`);
+
     return surfaceWaterSites.map((location: any) => {
-      const rawCoords: [number, number] = (location.geometry?.coordinates || location.properties?.coordinates) as [number, number];
+      // Extract coordinates from either geometry or properties
+      let rawCoords: [number, number] | null = null;
+      
+      if (location.geometry?.coordinates) {
+        rawCoords = location.geometry.coordinates as [number, number];
+      } else if (location.properties?.coordinates) {
+        rawCoords = location.properties.coordinates as [number, number];
+      } else if (location.properties?.latitude && location.properties?.longitude) {
+        // Some USGS APIs return lat/lng as separate properties
+        rawCoords = [location.properties.longitude, location.properties.latitude];
+      }
+
+      if (!rawCoords || rawCoords.length !== 2) {
+        console.warn('Invalid coordinates for location:', location.id || location.properties?.monitoring_location_number, rawCoords);
+        return null;
+      }
+
       const [minLng, minLat, maxLng, maxLat] = bbox;
+      let lng = rawCoords[0];
+      let lat = rawCoords[1];
 
-      // Normalize to [lng, lat] based on bbox containment
-      let lng = rawCoords?.[0];
-      let lat = rawCoords?.[1];
+      // Validate coordinate ranges
+      if (typeof lng !== 'number' || typeof lat !== 'number' || 
+          isNaN(lng) || isNaN(lat)) {
+        console.warn('Invalid coordinate values for location:', location.id || location.properties?.monitoring_location_number, rawCoords);
+        return null;
+      }
 
+      // Check if coordinates are in valid ranges
+      if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+        console.warn('Coordinates out of valid range for location:', location.id || location.properties?.monitoring_location_number, rawCoords);
+        return null;
+      }
+
+      // Check if coordinates are within the bounding box
       const isInBbox = (lo: number, la: number) => lo >= minLng && lo <= maxLng && la >= minLat && la <= maxLat;
 
+      // If coordinates don't seem to be in the bbox, they might be reversed
       if (!isInBbox(lng, lat) && isInBbox(lat, lng)) {
-        // Coordinates appear reversed as [lat, lng]; swap
+        // Coordinates appear reversed as [lat, lng]; swap them
         [lng, lat] = [lat, lng];
-        console.warn('Swapped misordered coordinates from [lat,lng] to [lng,lat] for site:', location.id || location.properties?.monitoring_location_number);
+        console.log('Swapped misordered coordinates from [lat,lng] to [lng,lat] for site:', location.id || location.properties?.monitoring_location_number);
+      }
+
+      // Final validation - ensure coordinates are in the bbox
+      if (!isInBbox(lng, lat)) {
+        console.warn('Coordinates outside bbox for location:', location.id || location.properties?.monitoring_location_number, [lng, lat], bbox);
+        return null;
       }
 
       return {
-        id: location.id || location.properties.monitoring_location_number,
-        name: location.properties.monitoring_location_name || `Site ${location.properties.monitoring_location_number}`,
-        siteId: location.properties.monitoring_location_number,
-        coordinates: [lng, lat],
-        siteType: location.properties.site_type_cd || location.properties.site_type_code,
+        id: location.id || location.properties?.monitoring_location_number,
+        name: location.properties?.monitoring_location_name || `Site ${location.properties?.monitoring_location_number}`,
+        siteId: location.properties?.monitoring_location_number,
+        coordinates: [lng, lat] as [number, number],
+        siteType: location.properties?.site_type_cd || location.properties?.site_type_code || 'ST',
         isDemo: isUsingDemoData
       };
-    });
+    }).filter(Boolean) as { 
+      id: string; 
+      name: string; 
+      siteId: string; 
+      coordinates: [number, number];
+      siteType: string;
+      isDemo: boolean;
+    }[];
   }
 
   async fetchLatestValue(siteId: string): Promise<USGSLatestValue | null> {

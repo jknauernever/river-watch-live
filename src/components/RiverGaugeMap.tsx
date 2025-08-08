@@ -54,7 +54,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     if (!map || isLoading) return;
 
     const bounds = map.getBounds();
-    if (!bounds) return;
+    if (!bounds) {
+      console.log('No map bounds available');
+      return;
+    }
 
     const ne = bounds.getNorthEast();
     const sw = bounds.getSouthWest();
@@ -62,14 +65,34 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       sw.lng(), sw.lat(), ne.lng(), ne.lat()
     ];
 
+    console.log('Map bounds:', {
+      southwest: [sw.lat(), sw.lng()],
+      northeast: [ne.lat(), ne.lng()],
+      bbox: bbox
+    });
+
     setIsLoading(true);
     console.log('Starting gauge location load for bbox:', bbox);
     try {
       const locations = await usgsService.getGaugeLocationsOnly(bbox);
       console.log('Received locations:', locations);
-      setBasicGaugeLocations(locations);
-      setIsUsingDemoData(locations.length > 0 && locations[0].isDemo);
-      console.log(`Loaded ${locations.length} gauge locations, isDemo: ${locations.length > 0 && locations[0].isDemo}`);
+      
+      // Filter out any locations with invalid coordinates
+      const validLocations = locations.filter(location => {
+        const [lng, lat] = location.coordinates;
+        if (typeof lng !== 'number' || typeof lat !== 'number' || 
+            isNaN(lng) || isNaN(lat) || 
+            lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+          console.warn('Filtering out invalid location:', location.name, location.coordinates);
+          return false;
+        }
+        return true;
+      });
+
+      console.log(`Filtered ${validLocations.length} valid locations from ${locations.length} total`);
+      setBasicGaugeLocations(validLocations);
+      setIsUsingDemoData(validLocations.length > 0 && validLocations[0].isDemo);
+      console.log(`Loaded ${validLocations.length} gauge locations, isDemo: ${validLocations.length > 0 && validLocations[0].isDemo}`);
     } catch (error) {
       console.error('Error loading gauge locations:', error);
     } finally {
