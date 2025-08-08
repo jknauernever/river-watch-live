@@ -21,6 +21,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const { map, isLoaded, error: mapError, resetView, loadPlacesLibrary } = useGoogleMaps({ apiKey });
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [fetchProgress, setFetchProgress] = useState<{ fetched: number; total?: number } | null>(null);
   const [stations, setStations] = useState<GaugeStation[]>([]);
   const [basicGaugeLocations, setBasicGaugeLocations] = useState<any[]>([]);
   const [selectedStation, setSelectedStation] = useState<GaugeStation | null>(null);
@@ -75,9 +76,12 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     });
 
     setIsLoading(true);
+    setFetchProgress({ fetched: 0, total: undefined });
     console.log('Starting gauge location load for bbox:', bbox);
     try {
-      const locations = await usgsService.getGaugeLocationsOnly(bbox);
+      const locations = await usgsService.getGaugeLocationsOnly(bbox, {
+        onProgress: (fetched, total) => setFetchProgress({ fetched, total }),
+      });
       console.log('Received locations:', locations);
       
       // Filter out any locations with invalid coordinates
@@ -100,6 +104,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       console.error('Error loading gauge locations:', error);
     } finally {
       setIsLoading(false);
+      setFetchProgress(null);
     }
   }, [map, isLoading]);
 
@@ -264,12 +269,18 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       )}
 
       {/* Loading indicator */}
-      {isLoadingData && (
+      {(isLoading || isLoadingData) && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
           <Card>
             <CardContent className="p-3 flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-sm">Loading water level data...</span>
+              <span className="text-sm">
+                {isLoading
+                  ? fetchProgress
+                    ? `Fetching gauges${fetchProgress.total ? `: ${fetchProgress.fetched} of ${fetchProgress.total}` : `: ${fetchProgress.fetched}...`}`
+                    : 'Fetching gauges...'
+                  : 'Loading water level data...'}
+              </span>
             </CardContent>
           </Card>
         </div>

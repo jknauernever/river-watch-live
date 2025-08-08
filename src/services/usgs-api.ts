@@ -34,7 +34,10 @@ export class USGSService {
     this.cache.set(key, { data, timestamp: Date.now() });
   }
 
-  async fetchMonitoringLocations(bbox: [number, number, number, number]): Promise<USGSMonitoringLocation[]> {
+  async fetchMonitoringLocations(
+    bbox: [number, number, number, number],
+    options?: { onProgress?: (fetched: number, total?: number) => void }
+  ): Promise<USGSMonitoringLocation[]> {
     const cacheKey = `locations-${bbox.join(',')}`;
     const cached = this.getCached<USGSMonitoringLocation[]>(cacheKey);
     if (cached) return cached;
@@ -74,6 +77,14 @@ export class USGSService {
           const page = await resp.json();
           const features: USGSMonitoringLocation[] = page.features || [];
           aggregated.push(...features);
+
+          // Emit progress after each page
+          try {
+            const total: number | undefined = typeof page.numberMatched === 'number' ? page.numberMatched : undefined;
+            options?.onProgress?.(aggregated.length, total);
+          } catch (_) {
+            // ignore progress errors
+          }
 
           // Discover next link
           const nextLink = Array.isArray(page.links)
@@ -142,7 +153,10 @@ export class USGSService {
     console.log(`Generated ${demoLocations.length} demo locations distributed across current map view`);
     return demoLocations;
   }
-  async getGaugeLocationsOnly(bbox: [number, number, number, number]): Promise<{ 
+  async getGaugeLocationsOnly(
+    bbox: [number, number, number, number],
+    options?: { onProgress?: (fetched: number, total?: number) => void }
+  ): Promise<{ 
     id: string; 
     name: string; 
     siteId: string; 
@@ -150,7 +164,7 @@ export class USGSService {
     siteType: string;
     isDemo: boolean;
   }[]> {
-    const locations = await this.fetchMonitoringLocations(bbox);
+    const locations = await this.fetchMonitoringLocations(bbox, options);
     
     // Check if any location has a demo site ID to determine if we're using demo data
     const isUsingDemoData = locations.some((location: any) => 
