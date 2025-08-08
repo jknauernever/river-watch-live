@@ -218,10 +218,13 @@ export class USGSService {
     for (let i = 0; i < basicStations.length; i += batchSize) {
       const batch = basicStations.slice(i, i + batchSize);
       const batchPromises = batch.map(async (station) => {
+        console.log(`Fetching water data for station: ${station.siteId}`);
         const latestValue = await this.fetchLatestValue(station.siteId);
+        console.log(`Latest value for ${station.siteId}:`, latestValue);
         
         const height = latestValue?.properties?.value || Math.random() * 10; // Demo data if no real data
         const waterLevel = calculateWaterLevel(height);
+        console.log(`Station ${station.siteId}: height=${height}, waterLevel=`, waterLevel);
 
         return {
           id: station.id,

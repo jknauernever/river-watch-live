@@ -60,8 +60,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     if (!showRiverData || basicGaugeLocations.length === 0 || isLoadingData) return;
     
     setIsLoadingData(true);
+    console.log('Loading water data for stations:', basicGaugeLocations);
     try {
       const enhancedStations = await usgsService.enhanceGaugeStationsWithData(basicGaugeLocations);
+      console.log('Enhanced stations received:', enhancedStations);
       setStations(enhancedStations);
 
       toast({
