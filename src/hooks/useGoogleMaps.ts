@@ -160,6 +160,7 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
     isLoaded,
     error,
     initializeMap,
+    loadPlacesLibrary,
     getMap,
     resetView
   };

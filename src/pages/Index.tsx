@@ -22,7 +22,9 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       {apiKey ? (
-        <RiverGaugeMap apiKey={apiKey} />
+        <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div>Loading map...</div></div>}>
+          <RiverGaugeMap apiKey={apiKey} />
+        </Suspense>
       ) : (
         <div className="flex items-center justify-center min-h-screen">
           <GoogleMapsLoader onApiKeySet={setApiKey} />
