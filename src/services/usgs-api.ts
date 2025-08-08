@@ -46,27 +46,33 @@ export class USGSService {
     }
 
     const requestPromise = (async () => {
+      console.log('Fetching monitoring locations for bbox:', bbox);
       try {
         const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
         // Try different parameter format based on OGC API standards
         url.searchParams.set('bbox', bbox.join(','));
         url.searchParams.set('f', 'json');
         url.searchParams.set('limit', '500');
-        // Remove API key to test if that's causing the issue
-        // url.searchParams.set('apikey', USGS_API_KEY);
+        // Add API key back to test
+        url.searchParams.set('apikey', USGS_API_KEY);
 
         console.log('Making USGS API request to:', url.toString());
         const response = await fetch(url.toString());
         
+        console.log('Response status:', response.status, response.statusText);
+        
         if (!response.ok) {
-          console.warn(`USGS API returned ${response.status}: ${response.statusText}`);
           const errorText = await response.text();
-          console.warn('Error response:', errorText);
+          console.warn(`USGS API returned ${response.status}: ${response.statusText}`);
+          console.warn('Error response body:', errorText);
+          console.log('Falling back to demo data due to API error');
           return this.generateDemoLocations(bbox);
         }
 
         const data = await response.json();
+        console.log('Raw API response:', data);
         const locations = data.features || [];
+        console.log(`Processing ${locations.length} locations from API`);
         this.setCache(cacheKey, locations);
         console.log(`Successfully fetched ${locations.length} monitoring locations from USGS API`);
         return locations;

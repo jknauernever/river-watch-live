@@ -41,11 +41,13 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     ];
 
     setIsLoading(true);
+    console.log('Starting gauge location load for bbox:', bbox);
     try {
       const locations = await usgsService.getGaugeLocationsOnly(bbox);
+      console.log('Received locations:', locations);
       setBasicGaugeLocations(locations);
       setIsUsingDemoData(locations.length > 0 && locations[0].isDemo);
-      console.log(`Loaded ${locations.length} gauge locations`);
+      console.log(`Loaded ${locations.length} gauge locations, isDemo: ${locations.length > 0 && locations[0].isDemo}`);
     } catch (error) {
       console.error('Error loading gauge locations:', error);
     } finally {
