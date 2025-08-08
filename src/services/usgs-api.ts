@@ -90,31 +90,24 @@ export class USGSService {
     return requestPromise;
   }
   
-  // Generate demo locations when API is unavailable
+  // Generate demo locations when API is unavailable - spread across current view
   generateDemoLocations(bbox: [number, number, number, number]): USGSMonitoringLocation[] {
-    // Fixed demo locations in Puget Sound area - these won't move with map bounds
-    const fixedDemoSites = [
-      { name: "Skagit River at Mount Vernon", coordinates: [-122.3344, 48.4262], siteId: "DEMO001" },
-      { name: "Snoqualmie River near Carnation", coordinates: [-121.9145, 47.6479], siteId: "DEMO002" },
-      { name: "Green River at Auburn", coordinates: [-122.2284, 47.3073], siteId: "DEMO003" },
-      { name: "Duwamish River at Tukwila", coordinates: [-122.2615, 47.4598], siteId: "DEMO004" },
-      { name: "Cedar River at Renton", coordinates: [-122.2071, 47.4829], siteId: "DEMO005" },
-      { name: "White River at Pacific", coordinates: [-122.2507, 47.2640], siteId: "DEMO006" },
-      { name: "Puyallup River at Puyallup", coordinates: [-122.3126, 47.1856], siteId: "DEMO007" },
-      { name: "Nisqually River at McKenna", coordinates: [-122.5654, 47.0873], siteId: "DEMO008" },
+    const [minLng, minLat, maxLng, maxLat] = bbox;
+    
+    // Generate gauges distributed across the visible map area
+    const demoSites = [
+      { name: "Skagit River at Mount Vernon", coordinates: [minLng + (maxLng - minLng) * 0.3, minLat + (maxLat - minLat) * 0.8], siteId: "DEMO001" },
+      { name: "Snoqualmie River near Carnation", coordinates: [minLng + (maxLng - minLng) * 0.6, minLat + (maxLat - minLat) * 0.7], siteId: "DEMO002" },
+      { name: "Green River at Auburn", coordinates: [minLng + (maxLng - minLng) * 0.4, minLat + (maxLat - minLat) * 0.3], siteId: "DEMO003" },
+      { name: "Duwamish River at Tukwila", coordinates: [minLng + (maxLng - minLng) * 0.5, minLat + (maxLat - minLat) * 0.5], siteId: "DEMO004" },
+      { name: "Cedar River at Renton", coordinates: [minLng + (maxLng - minLng) * 0.7, minLat + (maxLat - minLat) * 0.4], siteId: "DEMO005" },
+      { name: "White River at Pacific", coordinates: [minLng + (maxLng - minLng) * 0.8, minLat + (maxLat - minLat) * 0.2], siteId: "DEMO006" },
+      { name: "Puyallup River at Puyallup", coordinates: [minLng + (maxLng - minLng) * 0.2, minLat + (maxLat - minLat) * 0.6], siteId: "DEMO007" },
+      { name: "Nisqually River at McKenna", coordinates: [minLng + (maxLng - minLng) * 0.9, minLat + (maxLat - minLat) * 0.9], siteId: "DEMO008" },
     ];
     
-    // Check which demo sites are within the current viewport
-    const [minLng, minLat, maxLng, maxLat] = bbox;
-    const visibleSites = fixedDemoSites.filter(site => {
-      const [lng, lat] = site.coordinates;
-      return lng >= minLng && lng <= maxLng && lat >= minLat && lat <= maxLat;
-    });
-    
-    // If no sites are visible in current view, show the closest few sites
-    const demosToShow = visibleSites.length > 0 ? visibleSites : fixedDemoSites.slice(0, 5);
-    
-    const demoLocations: USGSMonitoringLocation[] = demosToShow.map((site) => ({
+    // All demo sites should now be visible within the current map bounds
+    const demoLocations: USGSMonitoringLocation[] = demoSites.map((site) => ({
       id: site.siteId,
       properties: {
         name: site.name,
@@ -130,7 +123,7 @@ export class USGSService {
       }
     } as any));
     
-    console.log(`Generated ${demoLocations.length} demo locations at fixed positions`);
+    console.log(`Generated ${demoLocations.length} demo locations distributed across current map view`);
     return demoLocations;
   }
   async getGaugeLocationsOnly(bbox: [number, number, number, number]): Promise<{ 
