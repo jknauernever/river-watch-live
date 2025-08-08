@@ -190,26 +190,56 @@ export const GaugeMarkers = ({
       stationsCount: stations.length
     });
 
-    const supportsAdvanced = !!(google.maps as any).marker?.AdvancedMarkerElement;
     const upsert = (id: string, lat: number, lng: number, title: string, color?: string) => {
-      const existing = markerMapRef.current.get(id) as any;
+      const existing = markerMapRef.current.get(id) as google.maps.Marker | undefined;
       if (existing) {
-        existing.position = { lat, lng };
-        if (!supportsAdvanced && color && existing.setIcon) {
+        if (existing.setPosition) existing.setPosition({ lat, lng });
+        if (existing.setIcon) {
           existing.setIcon({
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: color,
+            fillColor: color || '#1e90ff',
             fillOpacity: 0.8,
             strokeColor: '#ffffff',
             strokeWeight: 2,
-          });
+          } as any);
         }
         return existing;
       }
-      const marker = supportsAdvanced
-        ? new (google.maps as any).marker.AdvancedMarkerElement({ position: { lat, lng }, map, title })
-        : new google.maps.Marker({ position: { lat, lng }, map, title });
+
+      // Create using the original styled circular symbol and attach listeners
+      let marker: google.maps.Marker | null = null;
+      if (showRiverData) {
+        const station = stations.find(s => s.id === id);
+        if (station) {
+          marker = createStationMarker(station) as google.maps.Marker | null;
+        }
+      } else {
+        const loc = basicLocations.find(l => l.siteId === id);
+        if (loc) {
+          marker = createBasicMarker(loc) as google.maps.Marker | null;
+        }
+      }
+
+      if (!marker) {
+        marker = new google.maps.Marker({
+          position: { lat, lng },
+          map,
+          title,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: color || '#1e90ff',
+            fillOpacity: 0.8,
+            strokeColor: '#ffffff',
+            strokeWeight: 2,
+          },
+          visible: true,
+          zIndex: showRiverData ? 2 : 1,
+          animation: google.maps.Animation.DROP,
+        });
+      }
+
       markerMapRef.current.set(id, marker);
       return marker;
     };
