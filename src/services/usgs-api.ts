@@ -49,12 +49,10 @@ export class USGSService {
       console.log('Fetching monitoring locations for bbox:', bbox);
       try {
         const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
-        // Try different parameter format based on OGC API standards
+        // Use standard OGC API format without API key as it may be causing issues
         url.searchParams.set('bbox', bbox.join(','));
         url.searchParams.set('f', 'json');
-        url.searchParams.set('limit', '500');
-        // Add API key back to test
-        url.searchParams.set('apikey', USGS_API_KEY);
+        url.searchParams.set('limit', '100');
 
         console.log('Making USGS API request to:', url.toString());
         const response = await fetch(url.toString());
