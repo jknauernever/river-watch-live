@@ -1,3 +1,4 @@
+/// <reference types="google.maps" />
 import { useEffect, useRef, useState, useCallback } from 'react';
 
 interface UseGoogleMapsOptions {
@@ -14,8 +15,8 @@ declare global {
 
 export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoogleMapsOptions) => {
   console.log('useGoogleMaps hook called with:', { apiKey: apiKey ? 'present' : 'missing', containerId });
-  const mapInstanceRef = useRef<any>(null);
-  const [mapState, setMapState] = useState<any>(null);
+  const mapInstanceRef = useRef<google.maps.Map | null>(null);
+  const [mapState, setMapState] = useState<google.maps.Map | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scriptLoadedRef = useRef(false);
@@ -83,7 +84,7 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
       const { google } = window;
       
       console.log('Creating single map instance...');
-      const map = new google.maps.Map(container, {
+      const map = new google.maps.Map(container as HTMLElement, {
         zoom: 9,
         center: { lat: 47.6062, lng: -122.3321 }, // Puget Sound, Washington
         mapTypeId: 'terrain',
@@ -140,7 +141,7 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
     }
   }, [apiKey]);
 
-  const getMap = useCallback(() => {
+  const getMap = useCallback((): google.maps.Map | null => {
     return mapInstanceRef.current;
   }, []);
 

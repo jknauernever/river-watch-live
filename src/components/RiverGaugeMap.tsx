@@ -1,3 +1,4 @@
+/// <reference types="google.maps" />
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { GaugeStation } from '@/types/usgs';
 import { usgsService } from '@/services/usgs-api';
@@ -61,8 +62,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
     const ne = bounds.getNorthEast();
     const sw = bounds.getSouthWest();
+    // Normalize bbox to avoid floating jitter and improve cache hits
+    const round = (v: number) => Math.round(v * 1000) / 1000; // ~100m grid
     const bbox: [number, number, number, number] = [
-      sw.lng(), sw.lat(), ne.lng(), ne.lat()
+      round(sw.lng()), round(sw.lat()), round(ne.lng()), round(ne.lat())
     ];
 
     console.log('Map bounds:', {
@@ -141,12 +144,27 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   useEffect(() => {
     if (!map || !isLoaded) return;
 
-    const onceIdle = window.google.maps.event.addListenerOnce(map, 'idle', () => {
-      loadGaugeLocations();
-    });
+    // Debounced loader to avoid spamming requests while user pans/zooms
+    let debounceTimer: any = null;
+    const debouncedLoad = () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        loadGaugeLocations();
+      }, 400);
+    };
+
+    // Listen continuously so locations update with viewport changes
+    const idleListener = window.google.maps.event.addListener(map, 'idle', debouncedLoad);
 
     return () => {
-      window.google.maps.event.removeListener(onceIdle);
+      if (idleListener) {
+        window.google.maps.event.removeListener(idleListener as google.maps.MapsEventListener);
+      }
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
     };
   }, [map, isLoaded, loadGaugeLocations]);
 

@@ -10,22 +10,29 @@ const Index = () => {
     const init = async () => {
       const stored = localStorage.getItem("google-maps-api-key");
       const envKey = (import.meta as any)?.env?.VITE_GOOGLE_MAPS_API_KEY || "";
+      const urlKey = new URLSearchParams(window.location.search).get("gmaps_api_key") || "";
+
+      // If a key is provided via URL, prefer it and persist for subsequent loads (dev convenience)
+      if (urlKey) {
+        localStorage.setItem("google-maps-api-key", urlKey);
+        setApiKey(urlKey);
+        return;
+      }
+
       const candidate = stored || envKey || "";
       if (candidate) {
         setApiKey(candidate);
         return;
       }
+
+      // Optional: try Supabase function if configured in your environment
       try {
         const { data, error } = await supabase.functions.invoke("get-google-maps-key");
-        if (error) {
-          console.warn("Failed to fetch Google Maps key from Supabase:", error);
-          return;
-        }
-        if (data?.apiKey) {
+        if (!error && data?.apiKey) {
           setApiKey(data.apiKey);
         }
-      } catch (e) {
-        console.warn("Network error fetching Google Maps key", e);
+      } catch {
+        /* noop */
       }
     };
     init();

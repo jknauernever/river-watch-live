@@ -1,7 +1,7 @@
 import { USGSMonitoringLocation, USGSLatestValue, GaugeStation, WaterLevel, USGSHistoricalData } from '@/types/usgs';
 
 const USGS_BASE_URL = 'https://api.waterdata.usgs.gov/ogcapi/v0';
-const USGS_API_KEY = 'dWeC1OcaE272BTLdocXksg71zSMyR70ZkL0VUcJJ';
+const USGS_API_KEY: string = (import.meta as any)?.env?.VITE_USGS_API_KEY ?? '';
 
 // Calculate water level based on gage height value
 function calculateWaterLevel(value: number): WaterLevel {
@@ -48,32 +48,48 @@ export class USGSService {
     const requestPromise = (async () => {
       console.log('Fetching monitoring locations for bbox:', bbox);
       try {
-        const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
-        // Use standard OGC API format without API key as it may be causing issues
-        url.searchParams.set('bbox', bbox.join(','));
-        url.searchParams.set('f', 'json');
-        url.searchParams.set('limit', '100');
+        // Paginate through all results (USGS OGC API defaults to limited page sizes)
+        // We follow rel="next" links until exhausted or a sensible cap is reached
+        const aggregated: USGSMonitoringLocation[] = [];
+        const baseUrl = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+        baseUrl.searchParams.set('bbox', bbox.join(','));
+        baseUrl.searchParams.set('f', 'json');
+        baseUrl.searchParams.set('limit', '500'); // request larger pages when possible
 
-        console.log('Making USGS API request to:', url.toString());
-        const response = await fetch(url.toString());
-        
-        console.log('Response status:', response.status, response.statusText);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.warn(`USGS API returned ${response.status}: ${response.statusText}`);
-          console.warn('Error response body:', errorText);
-          console.log('Falling back to demo data due to API error');
+        let nextUrl: string | null = baseUrl.toString();
+        let pageCount = 0;
+        const maxPages = 10; // hard safety cap to avoid runaway loops
+
+        while (nextUrl && pageCount < maxPages) {
+          pageCount += 1;
+          console.log(`Fetching monitoring-locations page ${pageCount}:`, nextUrl);
+          const resp = await fetch(nextUrl);
+          if (!resp.ok) {
+            const errorText = await resp.text();
+            console.warn(`USGS API returned ${resp.status}: ${resp.statusText}`);
+            console.warn('Error response body:', errorText);
+            break;
+          }
+
+          const page = await resp.json();
+          const features: USGSMonitoringLocation[] = page.features || [];
+          aggregated.push(...features);
+
+          // Discover next link
+          const nextLink = Array.isArray(page.links)
+            ? page.links.find((l: any) => l.rel === 'next' && typeof l.href === 'string')
+            : null;
+          nextUrl = nextLink?.href || null;
+        }
+
+        if (aggregated.length === 0) {
+          console.log('No locations returned; falling back to demo data');
           return this.generateDemoLocations(bbox);
         }
 
-        const data = await response.json();
-        console.log('Raw API response:', data);
-        const locations = data.features || [];
-        console.log(`Processing ${locations.length} locations from API`);
-        this.setCache(cacheKey, locations);
-        console.log(`Successfully fetched ${locations.length} monitoring locations from USGS API`);
-        return locations;
+        console.log(`Aggregated ${aggregated.length} monitoring locations across ${pageCount} page(s)`);
+        this.setCache(cacheKey, aggregated);
+        return aggregated;
       } catch (error) {
         console.error('Error fetching monitoring locations:', error);
         // Fallback to demo data if API fails
@@ -143,8 +159,9 @@ export class USGSService {
     
     // Filter for surface water sites and return basic info only
     const surfaceWaterSites = locations.filter((location: any) => {
-      const siteType = location.properties?.site_type_cd || location.properties?.site_type_code;
-      return siteType === 'ST' || siteType === 'LK' || siteType === 'ES' || !siteType; // Include sites without type codes
+      const siteType = (location.properties?.site_type_cd || location.properties?.site_type_code || '').toString().toUpperCase();
+      // Include common surface-water types and allow sites with missing/unknown codes
+      return siteType === '' || siteType === 'ST' || siteType === 'LK' || siteType === 'ES' || siteType === 'ST-DCH' || siteType === 'ST-TS' || siteType === 'OC';
     });
 
     console.log(`Processing ${surfaceWaterSites.length} surface water sites`);
@@ -315,7 +332,7 @@ export class USGSService {
       
       const stations: GaugeStation[] = basicStations.map(station => {
         const latestValue = bulkGaugeData.get(station.siteId);
-        const height = latestValue?.properties?.value || Math.random() * 10; // Demo data if no real data
+        const height = latestValue?.properties?.value ?? Math.random() * 10; // Demo data if no real data
         const waterLevel = calculateWaterLevel(height);
         
         console.log(`Station ${station.siteId}: height=${height}, waterLevel=`, waterLevel);
@@ -345,7 +362,7 @@ export class USGSService {
         const latestValue = await this.fetchLatestValue(station.siteId);
         console.log(`Latest value for ${station.siteId}:`, latestValue);
         
-        const height = latestValue?.properties?.value || Math.random() * 10; // Demo data if no real data
+        const height = latestValue?.properties?.value ?? Math.random() * 10; // Demo data if no real data
         const waterLevel = calculateWaterLevel(height);
         console.log(`Station ${station.siteId}: height=${height}, waterLevel=`, waterLevel);
 
@@ -401,7 +418,10 @@ export class USGSService {
       url.searchParams.set('end', endDate);
       url.searchParams.set('f', 'json');
       url.searchParams.set('limit', '1000');
-      url.searchParams.set('apikey', USGS_API_KEY);
+      // Only include API key if provided via env; otherwise omit to avoid CORS/auth issues
+      if (USGS_API_KEY) {
+        url.searchParams.set('apikey', USGS_API_KEY);
+      }
 
       const response = await fetch(url.toString());
       if (!response.ok) {

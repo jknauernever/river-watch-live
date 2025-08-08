@@ -1,73 +1,55 @@
-# Welcome to your Lovable project
+# River Watch Live
 
-## Project info
+Interactive map that displays USGS river gauges and current water level data using the USGS Water Data OGC APIs and Google Maps.
 
-**URL**: https://lovable.dev/projects/bd458e73-d9b2-4672-8785-9e73091bc2ad
+### USGS API Reference
+- Main entry point: [USGS Water Data OGC APIs](https://api.waterdata.usgs.gov/ogcapi/v0/)
+- OpenAPI definition: [JSON](https://api.waterdata.usgs.gov/ogcapi/v0/openapi) · [HTML](https://api.waterdata.usgs.gov/ogcapi/v0/openapi?f=html)
+- Collections: `GET /collections`
+  - Monitoring locations: `GET /collections/monitoring-locations/items`
+  - Latest continuous values: `GET /collections/latest-continuous-values/items`
+  - Daily values: `GET /collections/daily-values/items`
 
-## How can I edit this code?
+Typical query params used by this app:
+- **bbox**: `minLon,minLat,maxLon,maxLat` to limit results to current map extent
+- **parameter_code**: `00065` for gage height
+- **monitoring_location_id**: USGS site id
+- **f**: `json`
+- **limit**: pagination size
 
-There are several ways of editing your application.
+Examples used in code:
+- Monitoring locations in a bbox: `GET /collections/monitoring-locations/items?bbox={minLon,minLat,maxLon,maxLat}&f=json&limit=100`
+- Latest gage heights in a bbox: `GET /collections/latest-continuous-values/items?bbox={minLon,minLat,maxLon,maxLat}&parameter_code=00065&f=json&limit=1000`
+- Historical daily values: `GET /collections/daily-values/items?monitoring_location_id={siteId}&parameter_code=00065&start={YYYY-MM-DD}&end={YYYY-MM-DD}&f=json&limit=1000`
 
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/bd458e73-d9b2-4672-8785-9e73091bc2ad) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
+### Project Setup
+1) Install dependencies
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
 npm i
+```
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+2) Configure environment
+```sh
+# Option A: Local storage (prompted by UI)
+# Option B: .env.local for Vite
+VITE_GOOGLE_MAPS_API_KEY=your_key_here
+# Optional for daily-values if required by your usage
+VITE_USGS_API_KEY=your_usgs_key_here
+```
+
+3) Run locally
+```sh
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+### Notes
+- The app fetches monitoring locations for the current map bounds, then optionally enhances them with latest gage height data via a single bulk request per extent.
+- When USGS endpoints are unavailable, the app shows demo locations distributed across the current view.
+- For security, do not commit API keys. Use env vars or local storage. Restrict Google Maps keys by HTTP referrers.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/bd458e73-d9b2-4672-8785-9e73091bc2ad) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+### Key Files
+- `src/pages/Index.tsx` – loads Google Maps key and renders the map
+- `src/components/RiverGaugeMap.tsx` – orchestrates fetching and rendering
+- `src/components/GaugeMarkers.tsx` – renders markers and info windows
+- `src/hooks/useGoogleMaps.ts` – loads and manages the Google Map instance
+- `src/services/usgs-api.ts` – USGS OGC API client

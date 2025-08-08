@@ -1,3 +1,4 @@
+/// <reference types="google.maps" />
 import { useEffect, useRef, useCallback } from 'react';
 import { GaugeStation } from '@/types/usgs';
 
@@ -9,7 +10,7 @@ interface BasicLocation {
 }
 
 interface GaugeMarkersProps {
-  map: any;
+  map: google.maps.Map | null;
   basicLocations: BasicLocation[];
   stations: GaugeStation[];
   showRiverData: boolean;
@@ -23,8 +24,8 @@ export const GaugeMarkers = ({
   showRiverData, 
   onStationSelect 
 }: GaugeMarkersProps) => {
-  const markersRef = useRef<any[]>([]);
-  const infoWindowRef = useRef<any>(null);
+  const markersRef = useRef<google.maps.Marker[]>([]);
+  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
 
   const clearMarkers = useCallback(() => {
     console.log('Clearing markers:', markersRef.current.length);
