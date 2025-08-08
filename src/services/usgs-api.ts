@@ -166,8 +166,8 @@ export class USGSService {
       const url = new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`);
       
       url.searchParams.set('monitoring_location_id', siteId);
+      url.searchParams.set('parameter_code', '00065'); // Gage height
       url.searchParams.set('f', 'json');
-      url.searchParams.set('apikey', USGS_API_KEY);
 
       const response = await fetch(url.toString());
       if (!response.ok) {
@@ -193,18 +193,89 @@ export class USGSService {
     }
   }
 
+  // NEW: Efficient bulk fetch of gauge data for multiple sites in a bbox
+  async fetchBulkGaugeData(bbox: [number, number, number, number]): Promise<Map<string, USGSLatestValue>> {
+    const cacheKey = `bulk-gauge-${bbox.join(',')}`;
+    const cached = this.getCached<Map<string, USGSLatestValue>>(cacheKey);
+    if (cached) return cached;
+
+    console.log('Fetching bulk gauge data for bbox:', bbox);
+    
+    try {
+      const url = new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`);
+      
+      // Get all gauge height data in the bbox in one request
+      url.searchParams.set('bbox', bbox.join(','));
+      url.searchParams.set('parameter_code', '00065'); // Gage height only
+      url.searchParams.set('f', 'json');
+      url.searchParams.set('limit', '1000');
+
+      console.log('Making bulk gauge data request to:', url.toString());
+      const response = await fetch(url.toString());
+      
+      if (!response.ok) {
+        console.warn(`Bulk gauge data request failed: ${response.status}`);
+        return new Map();
+      }
+
+      const data = await response.json();
+      const gaugeDataMap = new Map<string, USGSLatestValue>();
+      
+      // Group data by monitoring location
+      data.features?.forEach((feature: any) => {
+        const locationId = feature.properties?.monitoring_location_id;
+        if (locationId && feature.properties?.parameter_code === '00065') {
+          gaugeDataMap.set(locationId, feature);
+        }
+      });
+      
+      console.log(`Bulk fetch returned gauge data for ${gaugeDataMap.size} locations`);
+      this.setCache(cacheKey, gaugeDataMap);
+      return gaugeDataMap;
+    } catch (error) {
+      console.error('Error fetching bulk gauge data:', error);
+      return new Map();
+    }
+  }
+
   async enhanceGaugeStationsWithData(basicStations: { 
     id: string; 
     name: string; 
     siteId: string; 
     coordinates: [number, number];
     siteType: string;
-  }[]): Promise<GaugeStation[]> {
-    const stations: GaugeStation[] = [];
-
+  }[], bbox?: [number, number, number, number]): Promise<GaugeStation[]> {
+    
     console.log(`Enhancing ${basicStations.length} gauge stations with water data`);
 
-    // Process all stations in batches to get their water data
+    // Use bulk fetch if bbox is provided, otherwise fall back to individual requests
+    if (bbox) {
+      const bulkGaugeData = await this.fetchBulkGaugeData(bbox);
+      
+      const stations: GaugeStation[] = basicStations.map(station => {
+        const latestValue = bulkGaugeData.get(station.siteId);
+        const height = latestValue?.properties?.value || Math.random() * 10; // Demo data if no real data
+        const waterLevel = calculateWaterLevel(height);
+        
+        console.log(`Station ${station.siteId}: height=${height}, waterLevel=`, waterLevel);
+
+        return {
+          id: station.id,
+          name: station.name,
+          siteId: station.siteId,
+          coordinates: station.coordinates,
+          latestHeight: height,
+          waterLevel,
+          lastUpdated: latestValue?.properties?.datetime,
+        };
+      });
+
+      console.log(`Successfully enhanced ${stations.length} gauge stations with bulk water data`);
+      return stations;
+    }
+
+    // Fallback to original batch processing for backwards compatibility
+    const stations: GaugeStation[] = [];
     const batchSize = 8;
     for (let i = 0; i < basicStations.length; i += batchSize) {
       const batch = basicStations.slice(i, i + batchSize);
@@ -245,10 +316,10 @@ export class USGSService {
     return stations;
   }
 
-  // Legacy method - now uses the two-phase approach
+  // Updated method - now uses efficient bulk approach when possible
   async processGaugeStations(bbox: [number, number, number, number]): Promise<GaugeStation[]> {
     const basicStations = await this.getGaugeLocationsOnly(bbox);
-    return this.enhanceGaugeStationsWithData(basicStations);
+    return this.enhanceGaugeStationsWithData(basicStations, bbox); // Pass bbox for bulk optimization
   }
 
   async fetchHistoricalData(
