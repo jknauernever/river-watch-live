@@ -33,8 +33,8 @@ export const useProperty = () => {
 
   const fetchProperties = async () => {
     try {
-      const { data, error } = await supabase
-        .from('properties')
+      const { data, error } = await (supabase as any)
+        .from('properties' as any)
         .select('*')
         .order('created_at', { ascending: false });
 
@@ -55,8 +55,8 @@ export const useProperty = () => {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('properties')
+      const { data, error } = await (supabase as any)
+        .from('properties' as any)
         .insert([
           {
             ...propertyData,
@@ -84,8 +84,8 @@ export const useProperty = () => {
     setCalculationLoading(true);
     try {
       // First check if calculation already exists
-      const { data: existingCalculation, error: fetchError } = await supabase
-        .from('carbon_calculations')
+      const { data: existingCalculation, error: fetchError } = await (supabase as any)
+        .from('carbon_calculations' as any)
         .select('*')
         .eq('property_id', property.id)
         .order('created_at', { ascending: false })
