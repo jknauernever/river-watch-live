@@ -15,6 +15,7 @@ declare global {
 export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoogleMapsOptions) => {
   console.log('useGoogleMaps hook called with:', { apiKey: apiKey ? 'present' : 'missing', containerId });
   const mapInstanceRef = useRef<any>(null);
+  const [mapState, setMapState] = useState<any>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scriptLoadedRef = useRef(false);
@@ -101,6 +102,7 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
       });
 
       mapInstanceRef.current = map;
+      setMapState(map);
       setIsLoaded(true);
       setError(null);
       
@@ -156,7 +158,7 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
   }, [apiKey, initializeMap]);
 
   return {
-    map: mapInstanceRef.current,
+    map: mapState,
     isLoaded,
     error,
     initializeMap,
