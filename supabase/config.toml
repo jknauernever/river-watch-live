@@ -1,0 +1,25 @@
+project_id = "sereallctpcqrdjmvwrs"
+
+[functions.get-mapbox-token]
+verify_jwt = false
+
+[functions.calculate-carbon]
+verify_jwt = false
+
+[functions.calculate-carbon-gee]
+verify_jwt = false
+
+[functions.gee-ndvi-timeseries]
+verify_jwt = false
+
+[functions.test-gee-hardcoded]
+verify_jwt = false
+
+[functions.gee-ndvi-node]
+verify_jwt = false
+
+[functions.get-gee-tiles]
+verify_jwt = false
+
+[functions.get-datasets]
+verify_jwt = false

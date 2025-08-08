@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Earth-inspired color palette for carbon tool */
+    --background: 0 0% 100%;
+    --foreground: 150 15% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 150 15% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 150 15% 15%;
+
+    /* Deep forest green as primary */
+    --primary: 150 60% 25%;
+    --primary-foreground: 0 0% 98%;
+    --primary-glow: 150 50% 35%;
+
+    /* Earth brown secondary */
+    --secondary: 25 25% 85%;
+    --secondary-foreground: 150 60% 25%;
+
+    --muted: 150 10% 95%;
+    --muted-foreground: 150 15% 45%;
+
+    /* Sky blue accent */
+    --accent: 200 80% 90%;
+    --accent-foreground: 150 60% 25%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 150 15% 88%;
+    --input: 150 15% 88%;
+    --ring: 150 60% 25%;
+
+    /* Earth gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-earth: linear-gradient(180deg, hsl(150 40% 95%), hsl(25 30% 92%));
+    --gradient-forest: linear-gradient(135deg, hsl(150 60% 25%), hsl(120 50% 35%));
+    
+    /* Shadows with earth tones */
+    --shadow-earth: 0 10px 30px -10px hsl(var(--primary) / 0.2);
+    --shadow-glow: 0 0 40px hsl(var(--primary-glow) / 0.3);
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 150 15% 8%;
+    --foreground: 150 10% 90%;
+
+    --card: 150 15% 10%;
+    --card-foreground: 150 10% 90%;
+
+    --popover: 150 15% 10%;
+    --popover-foreground: 150 10% 90%;
+
+    --primary: 150 50% 60%;
+    --primary-foreground: 150 15% 8%;
+    --primary-glow: 150 60% 70%;
+
+    --secondary: 150 15% 20%;
+    --secondary-foreground: 150 10% 90%;
+
+    --muted: 150 15% 15%;
+    --muted-foreground: 150 10% 65%;
+
+    --accent: 200 30% 25%;
+    --accent-foreground: 150 10% 90%;
+
+    --destructive: 0 62.8% 50%;
+    --destructive-foreground: 150 10% 90%;
+
+    --border: 150 15% 20%;
+    --input: 150 15% 20%;
+    --ring: 150 50% 60%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
