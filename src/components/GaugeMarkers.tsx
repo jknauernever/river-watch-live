@@ -263,9 +263,16 @@ export const GaugeMarkers = ({
       }
     });
 
-    // Ensure a clusterer exists
-    if (!clustererRef.current && map) {
-      clustererRef.current = new MarkerClusterer({ map });
+    // Clustering: only enable when more than 500 targets are present
+    const useCluster = targets.length > 500;
+    if (useCluster) {
+      if (!clustererRef.current && map) {
+        clustererRef.current = new MarkerClusterer({ map });
+      }
+    } else {
+      if (clustererRef.current) {
+        clustererRef.current.clearMarkers();
+      }
     }
 
     // Batch additions/updates
@@ -276,10 +283,11 @@ export const GaugeMarkers = ({
       for (; index < end; index++) {
         const t = targets[index];
         const m = upsert(t.id, t.lat, t.lng, t.title, t.color);
-        if ((m as any).setMap) (m as any).setMap(null);
-        // add to clusterer (which attaches to map)
-        if (clustererRef.current && (m as any).position) {
-          clustererRef.current.addMarker(m as any);
+        if (useCluster) {
+          if ((m as any).setMap) (m as any).setMap(null);
+          if (clustererRef.current && (m as any).position) {
+            clustererRef.current.addMarker(m as any);
+          }
         } else if ((m as any).setMap) {
           (m as any).setMap(map);
         }

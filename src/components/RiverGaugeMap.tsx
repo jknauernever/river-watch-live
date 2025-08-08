@@ -94,9 +94,12 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
             siteType: f.properties?.site_type_cd || f.properties?.site_type_code || 'ST',
             isDemo: false,
           })).filter((l: any) => Array.isArray(l.coordinates) && l.coordinates.length === 2);
+          // Deduplicate by siteId while streaming pages
           setBasicGaugeLocations(prev => {
-            const map = new Map(prev.map(p => [p.siteId, p]));
-            valid.forEach(v => map.set(v.siteId, v));
+            const map = new Map<string, any>(prev.map(p => [p.siteId, p]));
+            for (const v of valid) {
+              map.set(v.siteId, v);
+            }
             return Array.from(map.values());
           });
         },

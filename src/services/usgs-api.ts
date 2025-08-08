@@ -58,6 +58,7 @@ export class USGSService {
         // Paginate through all results (USGS OGC API defaults to limited page sizes)
         // We follow rel="next" links until exhausted or a sensible cap is reached
         const aggregated: USGSMonitoringLocation[] = [];
+        const seenIds = new Set<string>();
         const baseUrl = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
         baseUrl.searchParams.set('bbox', bbox.join(','));
         baseUrl.searchParams.set('f', 'json');
@@ -84,7 +85,12 @@ export class USGSService {
 
           const page = await resp.json();
           const features: USGSMonitoringLocation[] = page.features || [];
-          aggregated.push(...features);
+          for (const f of features) {
+            const fid = (f as any).id || (f as any).properties?.monitoring_location_number;
+            if (!fid || seenIds.has(fid)) continue;
+            seenIds.add(fid);
+            aggregated.push(f);
+          }
 
           // Provide page to caller for progressive rendering
           try {
