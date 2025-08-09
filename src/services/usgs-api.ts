@@ -85,6 +85,15 @@ export class USGSService {
 
           const page = await resp.json();
           const features: USGSMonitoringLocation[] = page.features || [];
+
+          // Report progress BEFORE streaming, so callers can decide to abort early
+          try {
+            const total: number | undefined = typeof page.numberMatched === 'number' ? page.numberMatched : undefined;
+            options?.onProgress?.(aggregated.length + features.length, total);
+          } catch (_) {
+            // ignore progress errors
+          }
+
           for (const f of features) {
             const fid = (f as any).id || (f as any).properties?.monitoring_location_number;
             if (!fid || seenIds.has(fid)) continue;
@@ -92,11 +101,13 @@ export class USGSService {
             aggregated.push(f);
           }
 
-          // Provide page to caller for progressive rendering
-          try {
-            options?.onPage?.(features, pageCount - 1);
-          } catch (_) {
-            // ignore page callback errors
+          // Provide page to caller for progressive rendering if not aborted
+          if (!options?.signal?.aborted) {
+            try {
+              options?.onPage?.(features, pageCount - 1);
+            } catch (_) {
+              // ignore page callback errors
+            }
           }
 
           // Emit progress after each page

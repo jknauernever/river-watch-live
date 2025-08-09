@@ -27,6 +27,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [selectedStation, setSelectedStation] = useState<GaugeStation | null>(null);
   const [showRiverData, setShowRiverData] = useState(false);
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
+  const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
   const { toast } = useToast();
   const searchInitializedRef = useRef(false);
 
@@ -77,14 +78,22 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
     setIsLoading(true);
     setFetchProgress({ fetched: 0, total: undefined });
+    setTooManyInExtent(null);
     // Cancel any in-flight request
     (loadGaugeLocations as any).abortController?.abort?.();
     const abortController = new AbortController();
     (loadGaugeLocations as any).abortController = abortController;
     console.log('Starting gauge location load for bbox:', bbox);
     try {
+      const LIMIT = 1000;
       const locations = await usgsService.getGaugeLocationsOnly(bbox, {
-        onProgress: (fetched, total) => setFetchProgress({ fetched, total }),
+        onProgress: (fetched, total) => {
+          setFetchProgress({ fetched, total });
+          if ((total && total > LIMIT) || fetched > LIMIT) {
+            setTooManyInExtent({ total: total || fetched });
+            abortController.abort();
+          }
+        },
         onPage: (features) => {
           const valid = features.map((f: any) => ({
             id: f.id || f.properties?.monitoring_location_number,
@@ -295,7 +304,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       )}
 
       {/* Loading indicator */}
-      {(isLoading || isLoadingData) && (
+      {(isLoading || isLoadingData) && !tooManyInExtent && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
           <Card>
             <CardContent className="p-3 flex items-center gap-2">
@@ -307,6 +316,19 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
                     : 'Fetching gauges...'
                   : 'Loading water level data...'}
               </span>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Too many markers notice */}
+      {tooManyInExtent && (
+        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
+          <Card>
+            <CardContent className="p-3">
+              <div className="text-sm">
+                Too many gauges in view ({tooManyInExtent.total.toLocaleString()}). Zoom in to see up to 1,000 markers.
+              </div>
             </CardContent>
           </Card>
         </div>
