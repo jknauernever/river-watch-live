@@ -61,6 +61,9 @@ export class USGSService {
       baseUrl.searchParams.set('bbox', bbox.join(','));
       baseUrl.searchParams.set('f', 'json');
       baseUrl.searchParams.set('limit', String(pageLimit));
+      // Restrict to surface-water related site types to reflect "gauges" only
+      baseUrl.searchParams.set('filter-lang', 'cql2-text');
+      baseUrl.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
 
       let nextUrl: string | null = baseUrl.toString();
 
@@ -115,6 +118,9 @@ export class USGSService {
       url.searchParams.set('bbox', bbox.join(','));
       url.searchParams.set('f', 'json');
       url.searchParams.set('limit', String(threshold + 1));
+      // Restrict to surface-water related site types so the preflight reflects gauges
+      url.searchParams.set('filter-lang', 'cql2-text');
+      url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
       if (USGS_API_KEY) {
         url.searchParams.set('apikey', USGS_API_KEY);
       }
@@ -208,6 +214,9 @@ export class USGSService {
         baseUrl.searchParams.set('bbox', bbox.join(','));
         baseUrl.searchParams.set('f', 'json');
         baseUrl.searchParams.set('limit', '500'); // request larger pages when possible
+        // Restrict to surface-water related site types to reduce payload
+        baseUrl.searchParams.set('filter-lang', 'cql2-text');
+        baseUrl.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
         if (USGS_API_KEY) {
           baseUrl.searchParams.set('apikey', USGS_API_KEY);
         }
