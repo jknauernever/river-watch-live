@@ -29,7 +29,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
   const [countUnavailable, setCountUnavailable] = useState(false);
-  const [showVectorLayer, setShowVectorLayer] = useState(false);
+  const [renderMode, setRenderMode] = useState<'loading' | 'blocked' | 'markers' | 'countUnavailable'>('loading');
+  const requestIdRef = useRef(0);
   const preflightPendingRef = useRef(false);
   const { toast } = useToast();
   const searchInitializedRef = useRef(false);
@@ -83,7 +84,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     setFetchProgress({ fetched: 0, total: undefined });
     setTooManyInExtent(null);
     setCountUnavailable(false);
-    setShowVectorLayer(false);
+    setRenderMode('loading');
+    setBasicGaugeLocations([]);
+    setStations([]);
+    const myRequestId = ++requestIdRef.current;
     // Cancel any in-flight request
     (loadGaugeLocations as any).abortController?.abort?.();
     const abortController = new AbortController();
@@ -91,11 +95,15 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     console.log('Starting gauge location load for bbox:', bbox);
     try {
       const LIMIT = 1000;
-      // Definitive threshold check with limit=1001, with a timeout; no heatmap
+      // Definitive threshold check with limit=1001, with a timeout
       let decided = false;
       const controller = new AbortController();
       const timer = setTimeout(() => {
-        if (!decided) setCountUnavailable(true);
+        if (!decided) {
+          if (requestIdRef.current !== myRequestId) return;
+          setCountUnavailable(true);
+          setRenderMode('countUnavailable');
+        }
         controller.abort();
       }, 4000);
 
@@ -104,22 +112,27 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         const { total: t, exceedsThreshold } = await usgsService.fetchMonitoringLocationsCount(bbox, controller.signal, LIMIT);
         clearTimeout(timer);
         if (exceedsThreshold) {
+          if (requestIdRef.current !== myRequestId) return;
           setTooManyInExtent({ total: 1001 });
+          setRenderMode('blocked');
           decided = true;
         } else {
           total = t ?? 0;
+          if (requestIdRef.current !== myRequestId) return;
+          setRenderMode('markers');
           decided = true;
         }
       } catch (e) {
         clearTimeout(timer);
         // On failure, show count unavailable and block markers per policy
+        if (requestIdRef.current !== myRequestId) return;
         setCountUnavailable(true);
-        setShowVectorLayer(false);
+        setRenderMode('countUnavailable');
         setBasicGaugeLocations([]);
         return;
       }
 
-      if (decided && tooManyInExtent) return; // blocked; no markers
+      if (decided && renderMode !== 'markers') return; // blocked or unavailable; no markers
 
       if (total !== null && total <= LIMIT) {
         // Proceed to normal marker fetch below
@@ -149,6 +162,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           });
         },
         signal: abortController.signal,
+        maxFeatures: 1000,
       });
       console.log('Received locations:', locations);
       
@@ -292,7 +306,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       <MapContainer />
       
       {/* Markers Component */}
-      {!tooManyInExtent && !countUnavailable && (
+      {renderMode === 'markers' && (
         <GaugeMarkers 
           map={map}
           basicLocations={basicGaugeLocations}
@@ -342,7 +356,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       )}
 
       {/* Loading indicator */}
-      {(isLoading || isLoadingData) && !tooManyInExtent && (
+      {(isLoading || isLoadingData) && renderMode === 'loading' && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
           <Card>
             <CardContent className="p-3 flex items-center gap-2">
@@ -360,12 +374,12 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       )}
 
       {/* Too many markers notice */}
-      {tooManyInExtent && (
+      {renderMode === 'blocked' && tooManyInExtent && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
           <Card>
             <CardContent className="p-3">
               <div className="text-sm">
-                Too many gauges in view ({tooManyInExtent.total.toLocaleString()}). Showing a density preview. Zoom in to see individual gauges (up to 1,000).
+                Too many gauges in view. Zoom in to see up to 1,000 markers.
               </div>
             </CardContent>
           </Card>
@@ -373,7 +387,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       )}
 
       {/* Count unavailable notice */}
-      {countUnavailable && (
+      {renderMode === 'countUnavailable' && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
           <Card>
             <CardContent className="p-3">
@@ -418,7 +432,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       )}
 
       {/* Gauge count - always show when locations are loaded */}
-      {basicGaugeLocations.length > 0 && (
+      {renderMode === 'markers' && basicGaugeLocations.length > 0 && (
         <div className="absolute bottom-4 right-4 z-10">
           <Badge variant="secondary">
             {basicGaugeLocations.length} gauge{basicGaugeLocations.length !== 1 ? 's' : ''} in view
