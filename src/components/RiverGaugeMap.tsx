@@ -88,9 +88,14 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     console.log('Starting gauge location load for bbox:', bbox);
     try {
       const LIMIT = 1000;
-      // Preflight count
-      const total = await usgsService.fetchMonitoringLocationsCount(bbox);
-      if (total > LIMIT) {
+      // Preflight count with safe fallback
+      let total: number | null = null;
+      try {
+        total = await usgsService.fetchMonitoringLocationsCount(bbox);
+      } catch (countErr) {
+        console.warn('Count preflight failed; falling back to direct fetch', countErr);
+      }
+      if (total !== null && total > LIMIT) {
         setTooManyInExtent({ total });
         setShowVectorLayer(true);
         return; // skip marker fetch
