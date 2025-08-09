@@ -94,7 +94,42 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       // Preflight count with safe fallback
       let total: number | null = null;
       try {
-        total = await usgsService.fetchMonitoringLocationsCount(bbox);
+        const { total: t, exceedsThreshold } = await usgsService.fetchMonitoringLocationsCount(bbox);
+        if (exceedsThreshold) {
+          setTooManyInExtent({ total: 1001 });
+          setShowVectorLayer(true);
+          // Render heatmap overlay
+          try {
+            await loadVisualizationLibrary();
+            const sample = await usgsService.fetchMonitoringLocations(bbox, { maxFeatures: 1000 });
+            const points = sample.map((f: any) => {
+              const [lng, lat] = (f.geometry?.coordinates || f.properties?.coordinates) as [number, number];
+              return new window.google.maps.LatLng(lat, lng);
+            }).filter(Boolean);
+            if (heatmapRef.current) {
+              heatmapRef.current.setMap(null);
+            }
+            const subtleGradient = [
+              'rgba(0, 0, 255, 0)',
+              'rgba(0, 128, 255, 0.15)',
+              'rgba(0, 128, 255, 0.3)',
+              'rgba(0, 128, 255, 0.5)',
+              'rgba(0, 128, 255, 0.7)'
+            ];
+            heatmapRef.current = new (window as any).google.maps.visualization.HeatmapLayer({
+              data: points,
+              map,
+              radius: 14,
+              dissipating: true,
+              opacity: 0.45,
+              gradient: subtleGradient,
+            });
+          } catch (e) {
+            console.warn('Heatmap overlay failed:', e);
+          }
+          return; // skip marker fetching completely
+        }
+        total = t;
       } catch (countErr) {
         console.warn('Count preflight failed; blocking markers per policy', countErr);
       }

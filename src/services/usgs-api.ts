@@ -30,11 +30,15 @@ export class USGSService {
     return null;
   }
 
-  // Lightweight preflight to get total count in bbox without fetching all features
-  async fetchMonitoringLocationsCount(bbox: [number, number, number, number], signal?: AbortSignal): Promise<number> {
-    const cacheKey = `locations-count-${bbox.join(',')}`;
-    const cached = this.getCached<number>(cacheKey);
-    if (typeof cached === 'number') return cached;
+  // Threshold preflight: single request with limit=1001. If numberReturned==1001 or a next link exists → exceeds threshold.
+  async fetchMonitoringLocationsCount(
+    bbox: [number, number, number, number],
+    signal?: AbortSignal,
+    threshold: number = 1000
+  ): Promise<{ total: number | null; exceedsThreshold: boolean }> {
+    const cacheKey = `locations-count-${bbox.join(',')}-${threshold}`;
+    const cached = this.getCached<{ total: number | null; exceedsThreshold: boolean }>(cacheKey);
+    if (cached) return cached;
 
     if (this.requestQueue.has(cacheKey)) {
       return this.requestQueue.get(cacheKey)!;
@@ -44,18 +48,26 @@ export class USGSService {
       const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
       url.searchParams.set('bbox', bbox.join(','));
       url.searchParams.set('f', 'json');
-      url.searchParams.set('limit', '1');
-      url.searchParams.set('resultType', 'hits'); // OGC Features hint to return numberMatched only when supported
+      url.searchParams.set('limit', String(threshold + 1));
 
-      const resp = await fetch(url.toString(), { signal });
+      const resp = await fetch(url.toString(), {
+        signal,
+        headers: { Accept: 'application/json' },
+      });
       if (!resp.ok) {
         const errorText = await resp.text().catch(() => '');
         throw new Error(`USGS count failed: ${resp.status} ${resp.statusText} ${errorText}`);
       }
       const data = await resp.json();
-      const total: number = typeof data.numberMatched === 'number' ? data.numberMatched : (Array.isArray(data.features) ? data.features.length : 0);
-      this.setCache(cacheKey, total);
-      return total;
+      const numberReturned: number = typeof data.numberReturned === 'number' ? data.numberReturned : Array.isArray(data.features) ? data.features.length : 0;
+      const hasNextLink = Array.isArray(data.links) && data.links.some((l: any) => l?.rel === 'next');
+      const exceedsThreshold = numberReturned >= threshold + 1 || hasNextLink;
+      const result = {
+        total: exceedsThreshold ? null : numberReturned,
+        exceedsThreshold,
+      };
+      this.setCache(cacheKey, result);
+      return result;
     })();
 
     this.requestQueue.set(cacheKey, requestPromise);
