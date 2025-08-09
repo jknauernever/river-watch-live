@@ -34,6 +34,17 @@ const Index = () => {
       } catch {
         /* noop */
       }
+
+      // Fetch USGS API key from Supabase and persist for request helper
+      try {
+        const { data, error } = await supabase.functions.invoke("get-usgs-api-key");
+        const usgsKey = (data as any)?.apiKey as string | undefined;
+        if (!error && usgsKey) {
+          localStorage.setItem('usgs-api-key', usgsKey);
+        }
+      } catch {
+        /* noop */
+      }
     };
     init();
   }, []);
