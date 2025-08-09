@@ -301,6 +301,17 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     });
   }, [loadStations]);
 
+  const getUSGSApiKey = useCallback(() => {
+    try {
+      const local = typeof window !== 'undefined' ? localStorage.getItem('usgs-api-key') : '';
+      const envKey = (import.meta as any)?.env?.VITE_USGS_API_KEY || '';
+      return (local && local.trim()) || envKey;
+    } catch {
+      const envKey = (import.meta as any)?.env?.VITE_USGS_API_KEY || '';
+      return envKey;
+    }
+  }, []);
+
   // Show error state if map failed to load
   if (mapError) {
     return (
@@ -468,7 +479,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
                     url.searchParams.set('f', 'json');
                     url.searchParams.set('filter-lang', 'cql-text');
                     url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
-                    const k = (import.meta as any)?.env?.VITE_USGS_API_KEY;
+                    const k = getUSGSApiKey();
                     if (k) url.searchParams.set('apikey', k);
                     window.open(url.toString(), '_blank', 'noopener');
                   } catch {}
@@ -510,7 +521,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
                       url.searchParams.set('f', 'json');
                       url.searchParams.set('filter-lang', 'cql-text');
                       url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
-                      const k = (import.meta as any)?.env?.VITE_USGS_API_KEY;
+                      const k = getUSGSApiKey();
                       if (k) url.searchParams.set('apikey', k);
                       window.open(url.toString(), '_blank', 'noopener');
                     } catch {}
