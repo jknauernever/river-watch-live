@@ -16,6 +16,7 @@ interface GaugeMarkersProps {
   basicLocations: BasicLocation[];
   stations: GaugeStation[];
   showRiverData: boolean;
+  showValues?: boolean;
   onStationSelect?: (station: GaugeStation | null) => void;
 }
 
@@ -24,6 +25,7 @@ export const GaugeMarkers = ({
   basicLocations, 
   stations, 
   showRiverData, 
+  showValues,
   onStationSelect 
 }: GaugeMarkersProps) => {
   const markersRef = useRef<(google.maps.Marker | any)[]>([]);
@@ -144,6 +146,12 @@ export const GaugeMarkers = ({
         strokeColor: '#ffffff',
         strokeWeight: 2,
       },
+      label: (showValues && typeof station.latestHeight === 'number') ? {
+        text: station.latestHeight.toFixed(1),
+        color: '#111827',
+        fontWeight: '700',
+        fontSize: '12px',
+      } as any : undefined,
       // Ensure marker is visible
       visible: true,
       zIndex: 2
@@ -181,7 +189,7 @@ export const GaugeMarkers = ({
     });
 
     return marker;
-  }, [map, onStationSelect]);
+  }, [map, onStationSelect, showValues]);
 
   // Update markers when data changes using diffing and batching
   useEffect(() => {
@@ -210,13 +218,19 @@ export const GaugeMarkers = ({
             strokeWeight: 2,
           } as any);
         }
+        // Update label for values
+        if (showRiverData) {
+          const station = stations.find(s => s.siteId === id || s.id === id);
+          const labelText = (showValues && station && typeof station.latestHeight === 'number') ? station.latestHeight.toFixed(1) : undefined;
+          if ((existing as any).setLabel) (existing as any).setLabel(labelText as any);
+        }
         return existing;
       }
 
       // Create using the original styled circular symbol and attach listeners
       let marker: google.maps.Marker | null = null;
-      if (showRiverData) {
-        const station = stations.find(s => s.id === id);
+       if (showRiverData) {
+        const station = stations.find(s => s.siteId === id || s.id === id);
         if (station) {
           marker = createStationMarker(station) as google.maps.Marker | null;
         }
@@ -251,7 +265,7 @@ export const GaugeMarkers = ({
     };
 
     const targets: Array<{ id: string; lat: number; lng: number; title: string; color?: string }> = showRiverData
-      ? stations.map(s => ({ id: s.id, lat: s.coordinates[1], lng: s.coordinates[0], title: s.name, color: (typeof s.latestHeight === 'number') ? s.waterLevel.color : '#1e90ff' }))
+      ? stations.map(s => ({ id: s.siteId || s.id, lat: s.coordinates[1], lng: s.coordinates[0], title: s.name, color: (typeof s.latestHeight === 'number') ? s.waterLevel.color : '#1e90ff' }))
       : basicLocations.map(l => ({ id: l.siteId, lat: l.coordinates[1], lng: l.coordinates[0], title: l.name }));
 
     const nextIds = new Set(targets.map(t => t.id));
@@ -281,7 +295,7 @@ export const GaugeMarkers = ({
       if (index < targets.length) requestAnimationFrame(process);
     };
     process();
-  }, [map, basicLocations, stations, showRiverData, createBasicMarker, createStationMarker, clearMarkers]);
+  }, [map, basicLocations, stations, showRiverData, showValues, createBasicMarker, createStationMarker, clearMarkers]);
 
   // Cleanup on unmount
   useEffect(() => {

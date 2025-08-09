@@ -497,6 +497,9 @@ export class USGSService {
       url.searchParams.set('parameter_code', '00065'); // Gage height only
       url.searchParams.set('f', 'json');
       url.searchParams.set('limit', '1000');
+      if (USGS_API_KEY) {
+        url.searchParams.set('apikey', USGS_API_KEY);
+      }
 
       console.log('Making bulk gauge data request to:', url.toString());
       const response = await fetch(url.toString());
@@ -510,10 +513,32 @@ export class USGSService {
       const gaugeDataMap = new Map<string, USGSLatestValue>();
       
       // Group data by monitoring location
+      const addWithAliases = (id: string, value: USGSLatestValue) => {
+        // Raw id
+        if (!gaugeDataMap.has(id)) gaugeDataMap.set(id, value);
+        // Numeric-only variant (strip agency prefixes like 'USGS-' or 'USGS:')
+        const numeric = id.replace(/^USGS[:\-]?/i, '');
+        if (!gaugeDataMap.has(numeric)) gaugeDataMap.set(numeric, value);
+        // Explicit prefixed forms
+        const dash = `USGS-${numeric}`;
+        if (!gaugeDataMap.has(dash)) gaugeDataMap.set(dash, value);
+        const colon = `USGS:${numeric}`;
+        if (!gaugeDataMap.has(colon)) gaugeDataMap.set(colon, value);
+      };
+
       data.features?.forEach((feature: any) => {
-        const locationId = feature.properties?.monitoring_location_id;
-        if (locationId && feature.properties?.parameter_code === '00065') {
-          gaugeDataMap.set(locationId, feature);
+        if (feature?.properties?.parameter_code !== '00065') return;
+        const props = feature.properties || {};
+        const candidates: Array<string | undefined> = [
+          props.monitoring_location_id,
+          props.monitoring_location_identifier,
+          props.monitoring_location_number,
+          feature.id,
+          props.site_no,
+        ];
+        const first = candidates.find((v) => typeof v === 'string' && v.length > 0);
+        if (first) {
+          addWithAliases(String(first), feature);
         }
       });
       

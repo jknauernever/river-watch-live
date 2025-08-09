@@ -26,12 +26,13 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [basicGaugeLocations, setBasicGaugeLocations] = useState<any[]>([]);
   const [selectedStation, setSelectedStation] = useState<GaugeStation | null>(null);
   const [showRiverData, setShowRiverData] = useState(false);
+  const [showValues, setShowValues] = useState(false);
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
   const [countUnavailable, setCountUnavailable] = useState(false);
   const [renderMode, setRenderMode] = useState<'loading' | 'blocked' | 'markers' | 'countUnavailable'>('loading');
   const requestIdRef = useRef(0);
-  const [debugInfo, setDebugInfo] = useState<{ bbox: [number, number, number, number]; preflight?: { numberReturned?: number; elapsedMs?: number; exceeds?: boolean }; full?: { total: number; pages: number; elapsedMs: number; capped: boolean } | null; running: boolean } | null>(null);
+  const [debugInfo, setDebugInfo] = useState<{ bbox: [number, number, number, number]; preflight?: { numberReturned?: number; elapsedMs?: number; exceeds?: boolean }; full?: { total: number; pages: number; elapsedMs: number; capped: boolean } | null; running: boolean; match?: { stations: number; matched: number } } | null>(null);
   const preflightPendingRef = useRef(false);
   const { toast } = useToast();
   const searchInitializedRef = useRef(false);
@@ -198,6 +199,11 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           const bbox2: [number, number, number, number] = [sw2.lng(), sw2.lat(), ne2.lng(), ne2.lat()];
           const enhancedStations = await usgsService.enhanceGaugeStationsWithData(validLocations, bbox2);
           setStations(enhancedStations);
+          // Update debug with match stats
+          setDebugInfo(prev => {
+            const matched = enhancedStations.filter(s => typeof s.latestHeight === 'number').length;
+            return { ...(prev || { bbox: bbox2, running: false }), match: { stations: enhancedStations.length, matched } };
+          });
         }
       } catch (enhanceErr) {
         console.warn('Auto-enhance water data failed:', enhanceErr);
@@ -334,6 +340,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           basicLocations={basicGaugeLocations}
           stations={stations}
           showRiverData={showRiverData}
+          showValues={showValues}
           onStationSelect={setSelectedStation}
         />
       )}
@@ -361,6 +368,16 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         >
           <Droplets className="w-4 h-4 mr-2" />
           {showRiverData ? "Hide" : "Show"} Water Data
+        </Button>
+
+        <Button 
+          onClick={() => setShowValues(v => !v)}
+          variant={showValues ? "default" : "outline"}
+          size="sm"
+          disabled={!showRiverData}
+          className="pointer-events-auto"
+        >
+          {showValues ? 'Hide' : 'Show'} Values
         </Button>
         
         <Button onClick={resetView} variant="secondary" size="sm" className="pointer-events-auto">
@@ -427,6 +444,17 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
                 <div>Preflight: {debugInfo?.preflight ? `${debugInfo.preflight.numberReturned ?? 'n/a'} in ${debugInfo.preflight.elapsedMs}ms (exceeds=${debugInfo.preflight.exceeds ? 'yes' : 'no'})` : 'n/a'}</div>
                 <div>Full Count: {debugInfo?.full ? `${debugInfo.full.total} in ${debugInfo.full.pages} pages (${debugInfo.full.elapsedMs}ms)${debugInfo.full.capped ? ' [capped]' : ''}` : debugInfo?.running ? 'running…' : '—'}</div>
                 <div>State: mode={renderMode}, markers={basicGaugeLocations.length}, stations={stations.length}</div>
+                {debugInfo?.match ? (
+                  <div className="flex items-center gap-2">
+                    <span>Heights matched: {debugInfo.match.matched} of {debugInfo.match.stations}</span>
+                    <Button size="icon" variant="ghost" onClick={() => {
+                      try {
+                        const unmatched = stations.filter(s => typeof s.latestHeight !== 'number').map(s => s.siteId || s.id);
+                        navigator.clipboard.writeText(JSON.stringify({ unmatched }, null, 2));
+                      } catch {}
+                    }}>Copy unmatched</Button>
+                  </div>
+                ) : null}
                 <div>Fetch URL: <button className="underline" onClick={() => {
                   try {
                     const ne = map?.getBounds?.()?.getNorthEast();
