@@ -16,13 +16,11 @@ const Index = () => {
       if (urlKey) {
         localStorage.setItem("google-maps-api-key", urlKey);
         setApiKey(urlKey);
-        return;
       }
 
       const candidate = stored || envKey || "";
       if (candidate) {
         setApiKey(candidate);
-        return;
       }
 
       // Optional: try Supabase function if configured in your environment
