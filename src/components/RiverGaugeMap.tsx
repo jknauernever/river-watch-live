@@ -236,10 +236,25 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     ];
     
     setIsLoadingData(true);
-    console.log('Loading water data for stations:', basicGaugeLocations);
+    console.log('Loading water data for stations:', {
+      count: basicGaugeLocations.length,
+      bbox: bbox,
+      sampleStations: basicGaugeLocations.slice(0, 3).map(s => ({ name: s.name, siteId: s.siteId }))
+    });
+    
     try {
       const enhancedStations = await usgsService.enhanceGaugeStationsWithData(basicGaugeLocations, bbox);
-      console.log('Enhanced stations received:', enhancedStations);
+      console.log('Enhanced stations received:', {
+        total: enhancedStations.length,
+        withHeight: enhancedStations.filter(s => typeof s.latestHeight === 'number').length,
+        sample: enhancedStations.slice(0, 3).map(s => ({
+          name: s.name,
+          siteId: s.siteId,
+          hasHeight: typeof s.latestHeight === 'number',
+          height: s.latestHeight
+        }))
+      });
+      
       setStations(enhancedStations);
 
       toast({

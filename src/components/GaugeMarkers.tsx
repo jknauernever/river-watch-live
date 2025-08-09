@@ -201,7 +201,14 @@ export const GaugeMarkers = ({
     console.log('Updating markers:', {
       showRiverData,
       basicLocationsCount: basicLocations.length,
-      stationsCount: stations.length
+      stationsCount: stations.length,
+      showValues,
+      sampleStations: stations.slice(0, 3).map(s => ({
+        name: s.name,
+        siteId: s.siteId,
+        hasHeight: typeof s.latestHeight === 'number',
+        height: s.latestHeight
+      }))
     });
 
     const upsert = (id: string, lat: number, lng: number, title: string, color?: string) => {
@@ -232,7 +239,10 @@ export const GaugeMarkers = ({
        if (showRiverData) {
         const station = stations.find(s => s.siteId === id || s.id === id);
         if (station) {
+          console.log(`Creating station marker for ${station.name} (${station.siteId}) with height: ${station.latestHeight}`);
           marker = createStationMarker(station) as google.maps.Marker | null;
+        } else {
+          console.log(`No station data found for ID: ${id}`);
         }
       } else {
         const loc = basicLocations.find(l => l.siteId === id);
@@ -242,6 +252,7 @@ export const GaugeMarkers = ({
       }
 
       if (!marker) {
+        console.log(`Creating fallback marker for ID: ${id}`);
         marker = new google.maps.Marker({
           position: { lat, lng },
           map,
@@ -267,6 +278,16 @@ export const GaugeMarkers = ({
     const targets: Array<{ id: string; lat: number; lng: number; title: string; color?: string }> = showRiverData
       ? stations.map(s => ({ id: s.siteId || s.id, lat: s.coordinates[1], lng: s.coordinates[0], title: s.name, color: (typeof s.latestHeight === 'number') ? s.waterLevel.color : '#1e90ff' }))
       : basicLocations.map(l => ({ id: l.siteId, lat: l.coordinates[1], lng: l.coordinates[0], title: l.name }));
+
+    console.log('Target markers to create:', {
+      count: targets.length,
+      showRiverData,
+      sample: targets.slice(0, 3).map(t => ({
+        id: t.id,
+        title: t.title,
+        color: t.color
+      }))
+    });
 
     const nextIds = new Set(targets.map(t => t.id));
 

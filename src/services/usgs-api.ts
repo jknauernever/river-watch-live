@@ -492,13 +492,15 @@ export class USGSService {
     const cached = this.getCached<USGSLatestValue>(cacheKey);
     if (cached) return cached;
 
+    console.log(`Fetching latest value for site: ${siteId}`);
+    
     try {
       const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`));
-      
       url.searchParams.set('monitoring_location_id', siteId);
-      url.searchParams.set('parameter_code', '00065'); // Gage height
+      url.searchParams.set('parameter_code', '00065');
       url.searchParams.set('f', 'json');
 
+      console.log(`Making individual API call to: ${url.toString()}`);
       const response = await fetch(url.toString());
       if (!response.ok) {
         console.warn(`No data available for site ${siteId}: ${response.status}`);
@@ -506,6 +508,10 @@ export class USGSService {
       }
 
       const data = await response.json();
+      console.log(`Individual API response for ${siteId}:`, {
+        totalFeatures: data.features?.length || 0,
+        features: data.features
+      });
       
       // Find gage height data (parameter code 00065)
       const gageHeightData = data.features?.find((feature: any) => 
@@ -513,7 +519,10 @@ export class USGSService {
       );
       
       if (gageHeightData) {
+        console.log(`✓ Found gage height data for ${siteId}:`, gageHeightData.properties);
         this.setCache(cacheKey, gageHeightData);
+      } else {
+        console.log(`✗ No gage height data found for ${siteId}`);
       }
       
       return gageHeightData || null;
@@ -550,25 +559,69 @@ export class USGSService {
       }
 
       const data = await response.json();
+      console.log('Bulk gauge data response:', {
+        totalFeatures: data.features?.length || 0,
+        sampleFeature: data.features?.[0] || null
+      });
+      
       const gaugeDataMap = new Map<string, USGSLatestValue>();
       
-      // Group data by monitoring location
+      // Group data by monitoring location with enhanced ID matching
       const addWithAliases = (id: string, value: USGSLatestValue) => {
+        if (!id || typeof id !== 'string') return;
+        
+        console.log(`Processing ID: "${id}" for station`);
+        
         // Raw id
-        if (!gaugeDataMap.has(id)) gaugeDataMap.set(id, value);
+        if (!gaugeDataMap.has(id)) {
+          gaugeDataMap.set(id, value);
+          console.log(`  Added raw ID: "${id}"`);
+        }
+        
         // Numeric-only variant (strip agency prefixes like 'USGS-' or 'USGS:')
         const numeric = id.replace(/^USGS[:\-]?/i, '');
-        if (!gaugeDataMap.has(numeric)) gaugeDataMap.set(numeric, value);
+        if (numeric !== id && !gaugeDataMap.has(numeric)) {
+          gaugeDataMap.set(numeric, value);
+          console.log(`  Added numeric ID: "${numeric}"`);
+        }
+        
         // Explicit prefixed forms
         const dash = `USGS-${numeric}`;
-        if (!gaugeDataMap.has(dash)) gaugeDataMap.set(dash, value);
+        if (!gaugeDataMap.has(dash)) {
+          gaugeDataMap.set(dash, value);
+          console.log(`  Added dash ID: "${dash}"`);
+        }
+        
         const colon = `USGS:${numeric}`;
-        if (!gaugeDataMap.has(colon)) gaugeDataMap.set(colon, value);
+        if (!gaugeDataMap.has(colon)) {
+          gaugeDataMap.set(colon, value);
+          console.log(`  Added colon ID: "${colon}"`);
+        }
+        
+        // Additional variations for better matching
+        const cleanNumeric = numeric.replace(/[^0-9]/g, '');
+        if (cleanNumeric !== numeric && !gaugeDataMap.has(cleanNumeric)) {
+          gaugeDataMap.set(cleanNumeric, value);
+          console.log(`  Added clean numeric ID: "${cleanNumeric}"`);
+        }
       };
 
-      data.features?.forEach((feature: any) => {
+      data.features?.forEach((feature: any, index: number) => {
         if (feature?.properties?.parameter_code !== '00065') return;
+        
         const props = feature.properties || {};
+        console.log(`Feature ${index}:`, {
+          id: feature.id,
+          props: {
+            monitoring_location_id: props.monitoring_location_id,
+            monitoring_location_identifier: props.monitoring_location_identifier,
+            monitoring_location_number: props.monitoring_location_number,
+            site_no: props.site_no,
+            parameter_code: props.parameter_code,
+            value: props.value
+          }
+        });
+        
         const candidates: Array<string | undefined> = [
           props.monitoring_location_id,
           props.monitoring_location_identifier,
@@ -576,13 +629,17 @@ export class USGSService {
           feature.id,
           props.site_no,
         ];
+        
         const first = candidates.find((v) => typeof v === 'string' && v.length > 0);
         if (first) {
           addWithAliases(String(first), feature);
+        } else {
+          console.warn(`No valid ID found for feature ${index}:`, feature);
         }
       });
       
       console.log(`Bulk fetch returned gauge data for ${gaugeDataMap.size} locations`);
+      console.log('Available IDs in map:', Array.from(gaugeDataMap.keys()));
       this.setCache(cacheKey, gaugeDataMap);
       return gaugeDataMap;
     } catch (error) {
@@ -600,13 +657,42 @@ export class USGSService {
   }[], bbox?: [number, number, number, number]): Promise<GaugeStation[]> {
     
     console.log(`Enhancing ${basicStations.length} gauge stations with water data`);
+    console.log('Basic station IDs:', basicStations.map(s => s.siteId));
 
     // Use bulk fetch if bbox is provided, otherwise fall back to individual requests
     if (bbox) {
       const bulkGaugeData = await this.fetchBulkGaugeData(bbox);
+      console.log('Bulk gauge data keys available:', Array.from(bulkGaugeData.keys()));
       
       const stations: GaugeStation[] = basicStations.map(station => {
-        const latestValue = bulkGaugeData.get(station.siteId) || bulkGaugeData.get(station.id);
+        // Try multiple ID variations for matching
+        const idVariations = [
+          station.siteId,
+          station.id,
+          station.siteId.replace(/^USGS[:\-]?/i, ''),
+          station.id.replace(/^USGS[:\-]?/i, ''),
+          station.siteId.replace(/[^0-9]/g, ''),
+          station.id.replace(/[^0-9]/g, '')
+        ];
+        
+        console.log(`Looking for station ${station.name} (${station.siteId}) with variations:`, idVariations);
+        
+        let latestValue: USGSLatestValue | undefined;
+        let matchedId: string | undefined;
+        
+        for (const idVar of idVariations) {
+          if (bulkGaugeData.has(idVar)) {
+            latestValue = bulkGaugeData.get(idVar);
+            matchedId = idVar;
+            console.log(`  ✓ Matched with ID variation: "${idVar}"`);
+            break;
+          }
+        }
+        
+        if (!latestValue) {
+          console.log(`  ✗ No match found for station ${station.name} (${station.siteId})`);
+        }
+        
         const height = latestValue?.properties?.value;
         const waterLevel: WaterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
         
@@ -627,21 +713,28 @@ export class USGSService {
         .filter(x => typeof x.s.latestHeight !== 'number')
         .map(x => x.idx);
 
+      console.log(`Stations missing water data: ${missing.length} of ${stations.length}`);
+      
       if (missing.length > 0) {
+        console.log('Attempting individual API calls for missing stations...');
         const batchSize = 12;
         for (let i = 0; i < missing.length; i += batchSize) {
           const slice = missing.slice(i, i + batchSize);
           const promises = slice.map(async (idx) => {
             const siteId = stations[idx].siteId;
+            console.log(`Fetching individual data for site: ${siteId}`);
             const latest = await this.fetchLatestValue(siteId);
             const height = latest?.properties?.value;
             if (typeof height === 'number') {
+              console.log(`  ✓ Got height ${height} for ${siteId}`);
               stations[idx] = {
                 ...stations[idx],
                 latestHeight: height,
                 waterLevel: calculateWaterLevel(height),
                 lastUpdated: latest?.properties?.datetime,
               };
+            } else {
+              console.log(`  ✗ No height data for ${siteId}`);
             }
           });
           await Promise.allSettled(promises);
@@ -651,11 +744,20 @@ export class USGSService {
         }
       }
 
-      console.log(`Enhanced ${stations.length} stations; with data: ${stations.filter(s => typeof s.latestHeight === 'number').length}`);
+      const matchedCount = stations.filter(s => typeof s.latestHeight === 'number').length;
+      console.log(`Enhanced ${stations.length} stations; with data: ${matchedCount}`);
+      console.log('Final station summary:', stations.map(s => ({
+        name: s.name,
+        siteId: s.siteId,
+        hasHeight: typeof s.latestHeight === 'number',
+        height: s.latestHeight
+      })));
+      
       return stations;
     }
 
     // Fallback to original batch processing for backwards compatibility
+    console.log('Using fallback individual API calls...');
     const stations: GaugeStation[] = [];
     const batchSize = 8;
     for (let i = 0; i < basicStations.length; i += batchSize) {
