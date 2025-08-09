@@ -18,7 +18,7 @@ interface RiverGaugeMapProps {
 export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   console.log('NEW RiverGaugeMap rendering with apiKey:', apiKey ? 'present' : 'missing');
   
-  const { map, isLoaded, error: mapError, resetView, loadPlacesLibrary, loadVisualizationLibrary } = useGoogleMaps({ apiKey });
+  const { map, isLoaded, error: mapError, resetView, loadPlacesLibrary } = useGoogleMaps({ apiKey });
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [fetchProgress, setFetchProgress] = useState<{ fetched: number; total?: number } | null>(null);
@@ -30,7 +30,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
   const [countUnavailable, setCountUnavailable] = useState(false);
   const [showVectorLayer, setShowVectorLayer] = useState(false);
-  const heatmapRef = useRef<any>(null);
   const preflightPendingRef = useRef(false);
   const { toast } = useToast();
   const searchInitializedRef = useRef(false);
@@ -92,28 +91,11 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     console.log('Starting gauge location load for bbox:', bbox);
     try {
       const LIMIT = 1000;
-
-      // Stage A: fast probe (limit=1) to immediately decide “likely many” and preload viz lib
-      preflightPendingRef.current = true;
-      try {
-        await loadVisualizationLibrary();
-      } catch {}
-      let exceedsLikely = false;
-      try {
-        const quick = await usgsService.fetchMonitoringLocations(bbox, { maxFeatures: 1 });
-        // If we got 1 feature and it has a “next” link we’d only see via the paging API; we cannot see it here.
-        // Treat quick probe as inconclusive; proceed to Stage B.
-      } catch {}
-
-      // Stage B: definitive threshold check with limit=1001, with a timeout → heatmap
+      // Definitive threshold check with limit=1001, with a timeout; no heatmap
       let decided = false;
       const controller = new AbortController();
       const timer = setTimeout(() => {
-        if (!decided) {
-          setTooManyInExtent({ total: 1001 });
-          setShowVectorLayer(true);
-          decided = true;
-        }
+        if (!decided) setCountUnavailable(true);
         controller.abort();
       }, 4000);
 
@@ -123,7 +105,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         clearTimeout(timer);
         if (exceedsThreshold) {
           setTooManyInExtent({ total: 1001 });
-          setShowVectorLayer(true);
           decided = true;
         } else {
           total = t ?? 0;
@@ -135,46 +116,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         setCountUnavailable(true);
         setShowVectorLayer(false);
         setBasicGaugeLocations([]);
-        if (heatmapRef.current) {
-          heatmapRef.current.setMap(null);
-          heatmapRef.current = null;
-        }
         return;
       }
 
-      if (decided && showVectorLayer) {
-        // Render heatmap overlay (adaptive styling)
-        try {
-          const sample = await usgsService.fetchMonitoringLocations(bbox, { maxFeatures: 1000 });
-          const points = sample.map((f: any) => {
-            const [lng, lat] = (f.geometry?.coordinates || f.properties?.coordinates) as [number, number];
-            return new window.google.maps.LatLng(lat, lng);
-          }).filter(Boolean);
-          if (heatmapRef.current) {
-            heatmapRef.current.setMap(null);
-          }
-          // Slightly stronger at very low zooms
-          const subtleGradient = [
-            'rgba(0, 0, 255, 0)',
-            'rgba(0, 128, 255, 0.2)',
-            'rgba(0, 128, 255, 0.4)',
-            'rgba(0, 128, 255, 0.6)'
-          ];
-          const zoom = map?.getZoom?.() ?? 7;
-          const radius = Math.max(12, Math.min(26, 10 + (14 - Math.min(14, zoom))));
-          heatmapRef.current = new (window as any).google.maps.visualization.HeatmapLayer({
-            data: points,
-            map,
-            radius,
-            dissipating: true,
-            opacity: 0.55,
-            gradient: subtleGradient,
-          });
-        } catch (e) {
-          console.warn('Heatmap overlay failed:', e);
-        }
-        return; // skip markers
-      }
+      if (decided && tooManyInExtent) return; // blocked; no markers
 
       if (total !== null && total <= LIMIT) {
         // Proceed to normal marker fetch below
@@ -347,7 +292,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       <MapContainer />
       
       {/* Markers Component */}
-      {!showVectorLayer && (
+      {!tooManyInExtent && !countUnavailable && (
         <GaugeMarkers 
           map={map}
           basicLocations={basicGaugeLocations}
@@ -440,7 +385,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </div>
       )}
 
-      {/* Heatmap overlay is attached directly to the Google Map (no DOM overlay needed) */}
+      {/* Heatmap disabled per updated policy */}
 
       {/* Legend */}
       {showRiverData && (

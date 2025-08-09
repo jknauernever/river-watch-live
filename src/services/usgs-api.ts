@@ -206,6 +206,7 @@ export class USGSService {
       onProgress?: (fetched: number, total?: number) => void;
       onPage?: (features: USGSMonitoringLocation[], pageIndex: number) => void;
       signal?: AbortSignal;
+      maxFeatures?: number;
     }
   ): Promise<{ 
     id: string; 
