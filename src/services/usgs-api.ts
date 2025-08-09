@@ -128,11 +128,9 @@ export class USGSService {
       const preflightUrl = url.toString();
       const start = Date.now();
       console.info('[USGS preflight] GET', preflightUrl);
-
-      // Retry with simple exponential backoff for 429/5xx
+      // Retry/backoff for 429/5xx
       let attempt = 0;
       const maxAttempts = 3;
-      let lastError: any = null;
       while (attempt < maxAttempts) {
         try {
           const resp = await fetch(preflightUrl, {
@@ -142,7 +140,7 @@ export class USGSService {
           if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
             const retryAfter = Number(resp.headers.get('retry-after'));
             const delayMs = !isNaN(retryAfter) ? retryAfter * 1000 : 500 * Math.pow(2, attempt);
-            await new Promise((r) => setTimeout(r, delayMs));
+            await new Promise(r => setTimeout(r, delayMs));
             attempt += 1;
             continue;
           }
@@ -155,21 +153,17 @@ export class USGSService {
           const exceedsThreshold = numberReturned >= threshold + 1;
           const elapsedMs = Date.now() - start;
           console.info('[USGS preflight] bbox=', bbox, 'numberReturned=', numberReturned, 'exceeds=', exceedsThreshold, 'elapsedMs=', elapsedMs);
-          const result = {
-            total: exceedsThreshold ? null : numberReturned,
-            exceedsThreshold,
-          };
+          const result = { total: exceedsThreshold ? null : numberReturned, exceedsThreshold };
           this.setCache(cacheKey, result);
           return result;
-        } catch (err) {
-          lastError = err;
-          if ((err as any)?.name === 'AbortError') throw err;
-          // backoff before next try
-          await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+        } catch (err: any) {
+          if (err?.name === 'AbortError') throw err;
+          // backoff and retry
+          await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
           attempt += 1;
         }
       }
-      throw lastError ?? new Error('USGS preflight failed');
+      throw new Error('USGS preflight failed after retries');
     })();
 
     this.requestQueue.set(cacheKey, requestPromise);

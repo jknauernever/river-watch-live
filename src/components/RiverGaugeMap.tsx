@@ -102,8 +102,9 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       const timer = setTimeout(() => {
         if (!decided) {
           if (requestIdRef.current !== myRequestId) return;
+          // proceed with capped markers when count is slow
           setCountUnavailable(true);
-          setRenderMode('markers'); // proceed with capped markers when count unavailable
+          setRenderMode('markers');
         }
         controller.abort();
       }, 10000);
@@ -129,14 +130,13 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         }
       } catch (e) {
         clearTimeout(timer);
-        // On failure, proceed with capped markers and show non-blocking notice
+        // On failure, proceed with capped markers and show notice
         if (requestIdRef.current !== myRequestId) return;
         setCountUnavailable(true);
         setRenderMode('markers');
-        // continue to fetch with maxFeatures cap
       }
 
-      if (decided && renderMode !== 'markers') return; // blocked or unavailable; no markers
+      if (decided && renderMode !== 'markers') return; // blocked; no markers
 
       // Proceed to fetch locations; results will be capped via maxFeatures when needed
       const locations = await usgsService.getGaugeLocationsOnly(bbox, {
