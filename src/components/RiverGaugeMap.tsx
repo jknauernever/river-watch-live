@@ -28,6 +28,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [showRiverData, setShowRiverData] = useState(false);
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
+  const [showVectorLayer, setShowVectorLayer] = useState(false);
   const { toast } = useToast();
   const searchInitializedRef = useRef(false);
 
@@ -79,6 +80,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     setIsLoading(true);
     setFetchProgress({ fetched: 0, total: undefined });
     setTooManyInExtent(null);
+    setShowVectorLayer(false);
     // Cancel any in-flight request
     (loadGaugeLocations as any).abortController?.abort?.();
     const abortController = new AbortController();
@@ -86,13 +88,16 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     console.log('Starting gauge location load for bbox:', bbox);
     try {
       const LIMIT = 1000;
+      // Preflight count
+      const total = await usgsService.fetchMonitoringLocationsCount(bbox);
+      if (total > LIMIT) {
+        setTooManyInExtent({ total });
+        setShowVectorLayer(true);
+        return; // skip marker fetch
+      }
       const locations = await usgsService.getGaugeLocationsOnly(bbox, {
         onProgress: (fetched, total) => {
           setFetchProgress({ fetched, total });
-          if ((total && total > LIMIT) || fetched > LIMIT) {
-            setTooManyInExtent({ total: total || fetched });
-            abortController.abort();
-          }
         },
         onPage: (features) => {
           const valid = features.map((f: any) => ({
@@ -256,13 +261,15 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       <MapContainer />
       
       {/* Markers Component */}
-      <GaugeMarkers 
-        map={map}
-        basicLocations={basicGaugeLocations}
-        stations={stations}
-        showRiverData={showRiverData}
-        onStationSelect={setSelectedStation}
-      />
+      {!showVectorLayer && (
+        <GaugeMarkers 
+          map={map}
+          basicLocations={basicGaugeLocations}
+          stations={stations}
+          showRiverData={showRiverData}
+          onStationSelect={setSelectedStation}
+        />
+      )}
 
       {/* Header */}
       <div className="absolute top-4 left-4 right-4 z-10 flex gap-3 items-center">
@@ -331,6 +338,13 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
               </div>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* Vector tile overlay for large extents (placeholder raster style for now) */}
+      {showVectorLayer && (
+        <div className="absolute inset-0 pointer-events-none">
+          {/* In a full implementation, add a vector/raster tile overlay here. */}
         </div>
       )}
 

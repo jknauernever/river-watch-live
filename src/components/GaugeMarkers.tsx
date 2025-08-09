@@ -1,7 +1,8 @@
 /// <reference types="google.maps" />
 import { useEffect, useRef, useCallback } from 'react';
 import { GaugeStation } from '@/types/usgs';
-import { MarkerClusterer } from '@googlemaps/markerclusterer';
+// Clustering disabled per product decision; retain import commented for possible future use
+// import { MarkerClusterer } from '@googlemaps/markerclusterer';
 
 interface BasicLocation {
   siteId: string;
@@ -28,7 +29,7 @@ export const GaugeMarkers = ({
   const markersRef = useRef<(google.maps.Marker | any)[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
   const markerMapRef = useRef<Map<string, google.maps.Marker | any>>(new Map());
-  const clustererRef = useRef<MarkerClusterer | null>(null);
+  // const clustererRef = useRef<MarkerClusterer | null>(null);
 
   const clearMarkers = useCallback(() => {
     console.log('Clearing markers:', markersRef.current.length);
@@ -38,9 +39,9 @@ export const GaugeMarkers = ({
       infoWindowRef.current.close();
     }
     markerMapRef.current.clear();
-    if (clustererRef.current) {
-      clustererRef.current.clearMarkers();
-    }
+    // if (clustererRef.current) {
+    //   clustererRef.current.clearMarkers();
+    // }
   }, []);
 
   const createBasicMarker = useCallback((location: BasicLocation) => {
@@ -263,17 +264,7 @@ export const GaugeMarkers = ({
       }
     });
 
-    // Clustering: only enable when more than 500 targets are present
-    const useCluster = targets.length > 500;
-    if (useCluster) {
-      if (!clustererRef.current && map) {
-        clustererRef.current = new MarkerClusterer({ map });
-      }
-    } else {
-      if (clustererRef.current) {
-        clustererRef.current.clearMarkers();
-      }
-    }
+    // Clustering disabled; markers are placed directly on the map
 
     // Batch additions/updates
     const batchSize = 200;
@@ -283,12 +274,7 @@ export const GaugeMarkers = ({
       for (; index < end; index++) {
         const t = targets[index];
         const m = upsert(t.id, t.lat, t.lng, t.title, t.color);
-        if (useCluster) {
-          if ((m as any).setMap) (m as any).setMap(null);
-          if (clustererRef.current && (m as any).position) {
-            clustererRef.current.addMarker(m as any);
-          }
-        } else if ((m as any).setMap) {
+        if ((m as any).setMap) {
           (m as any).setMap(map);
         }
       }

@@ -30,6 +30,42 @@ export class USGSService {
     return null;
   }
 
+  // Lightweight preflight to get total count in bbox without fetching all features
+  async fetchMonitoringLocationsCount(bbox: [number, number, number, number], signal?: AbortSignal): Promise<number> {
+    const cacheKey = `locations-count-${bbox.join(',')}`;
+    const cached = this.getCached<number>(cacheKey);
+    if (typeof cached === 'number') return cached;
+
+    if (this.requestQueue.has(cacheKey)) {
+      return this.requestQueue.get(cacheKey)!;
+    }
+
+    const requestPromise = (async () => {
+      const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+      url.searchParams.set('bbox', bbox.join(','));
+      url.searchParams.set('f', 'json');
+      url.searchParams.set('limit', '1');
+      url.searchParams.set('resultType', 'hits'); // OGC Features hint to return numberMatched only when supported
+
+      const resp = await fetch(url.toString(), { signal });
+      if (!resp.ok) {
+        const errorText = await resp.text().catch(() => '');
+        throw new Error(`USGS count failed: ${resp.status} ${resp.statusText} ${errorText}`);
+      }
+      const data = await resp.json();
+      const total: number = typeof data.numberMatched === 'number' ? data.numberMatched : (Array.isArray(data.features) ? data.features.length : 0);
+      this.setCache(cacheKey, total);
+      return total;
+    })();
+
+    this.requestQueue.set(cacheKey, requestPromise);
+    try {
+      return await requestPromise;
+    } finally {
+      this.requestQueue.delete(cacheKey);
+    }
+  }
+
   private setCache<T>(key: string, data: T): void {
     this.cache.set(key, { data, timestamp: Date.now() });
   }
