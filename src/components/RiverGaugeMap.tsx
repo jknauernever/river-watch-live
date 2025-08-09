@@ -317,8 +317,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       )}
 
       {/* Header */}
-      <div className="absolute top-4 left-4 right-4 z-10 flex gap-3 items-center">
-        <Card className="flex-1 max-w-md">
+      <div className="absolute top-4 left-4 right-4 z-10 flex gap-3 items-center pointer-events-none">
+        <Card className="flex-1 max-w-md pointer-events-auto">
           <CardContent className="p-3">
             <input
               id="search-input"
@@ -335,12 +335,13 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           variant={showRiverData ? "default" : "outline"} 
           size="sm"
           disabled={basicGaugeLocations.length === 0}
+          className="pointer-events-auto"
         >
           <Droplets className="w-4 h-4 mr-2" />
           {showRiverData ? "Hide" : "Show"} Water Data
         </Button>
         
-        <Button onClick={resetView} variant="secondary" size="sm">
+        <Button onClick={resetView} variant="secondary" size="sm" className="pointer-events-auto">
           <RotateCcw className="w-4 h-4 mr-2" />
           Reset
         </Button>
@@ -348,8 +349,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
       {/* Demo Data Warning */}
       {isUsingDemoData && (
-        <div className="absolute top-4 right-4 z-20">
-          <div className="bg-red-600 text-white px-3 py-2 rounded-md shadow-lg font-bold text-sm">
+        <div className="absolute top-4 right-4 z-20 pointer-events-none">
+          <div className="bg-red-600 text-white px-3 py-2 rounded-md shadow-lg font-bold text-sm pointer-events-auto">
             Warning: Demo Data
           </div>
         </div>
@@ -357,8 +358,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
       {/* Loading indicator */}
       {(isLoading || isLoadingData) && renderMode === 'loading' && (
-        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
-          <Card>
+        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
+          <Card className="pointer-events-auto">
             <CardContent className="p-3 flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span className="text-sm">
@@ -375,8 +376,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
       {/* Too many markers notice */}
       {renderMode === 'blocked' && tooManyInExtent && (
-        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
-          <Card>
+        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
+          <Card className="pointer-events-auto">
             <CardContent className="p-3">
               <div className="text-sm">
                 Too many gauges in view. Zoom in to see up to 1,000 markers.
@@ -388,8 +389,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
       {/* Count unavailable notice */}
       {renderMode === 'countUnavailable' && (
-        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
-          <Card>
+        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
+          <Card className="pointer-events-auto">
             <CardContent className="p-3">
               <div className="text-sm">
                 Gauge count is currently unavailable. Zoom in or try again.
@@ -433,7 +434,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
       {/* Gauge count - always show when locations are loaded */}
       {renderMode === 'markers' && basicGaugeLocations.length > 0 && (
-        <div className="absolute bottom-4 right-4 z-10">
+        <div className="absolute bottom-4 right-4 z-10 pointer-events-none">
           <Badge variant="secondary">
             {basicGaugeLocations.length} gauge{basicGaugeLocations.length !== 1 ? 's' : ''} in view
             {showRiverData && stations.length > 0 && ` • ${stations.length} with data`}
