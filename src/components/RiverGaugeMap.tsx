@@ -425,6 +425,29 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
                   }
                 }}>Run full count</Button>
                 <Button size="sm" variant="ghost" onClick={() => { try { navigator.clipboard.writeText(JSON.stringify(debugInfo, null, 2)); } catch {} }}>Copy</Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    try {
+                      const bounds = map?.getBounds?.();
+                      if (!bounds) return;
+                      const ne = bounds.getNorthEast();
+                      const sw = bounds.getSouthWest();
+                      const round = (v: number) => Math.round(v * 1000) / 1000;
+                      const b = [round(sw.lng()), round(sw.lat()), round(ne.lng()), round(ne.lat())] as [number, number, number, number];
+                      const url = new URL('https://api.waterdata.usgs.gov/ogcapi/v0/collections/monitoring-locations/items');
+                      url.searchParams.set('bbox', b.join(','));
+                      url.searchParams.set('limit', '501');
+                      url.searchParams.set('f', 'json');
+                      url.searchParams.set('filter-lang', 'cql2-text');
+                      url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
+                      window.open(url.toString(), '_blank', 'noopener');
+                    } catch {}
+                  }}
+                >
+                  Open preflight URL
+                </Button>
               </div>
             </CardContent>
           </Card>
