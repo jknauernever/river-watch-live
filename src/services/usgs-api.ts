@@ -221,13 +221,14 @@ export class USGSService {
         baseUrl.searchParams.set('f', 'json');
         baseUrl.searchParams.set('limit', '500'); // request larger pages when possible
         // Restrict to surface-water related site types to reduce payload
-        baseUrl.searchParams.set('filter-lang', 'cql2-text');
+        baseUrl.searchParams.set('filter-lang', 'cql-text');
         baseUrl.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
         if (USGS_API_KEY) {
           baseUrl.searchParams.set('apikey', USGS_API_KEY);
         }
 
         let nextUrl: string | null = baseUrl.toString();
+        let filterEnabled = true;
         let pageCount = 0;
         const maxPages = 10; // hard safety cap to avoid runaway loops
 
@@ -252,6 +253,20 @@ export class USGSService {
             break;
           }
           if (!resp || !resp.ok) {
+            // If server rejects filter usage, retry once without filter starting at this page
+            if (resp && resp.status === 400 && filterEnabled) {
+              console.warn('400 with filter; retrying without filter for paging');
+              const noFilter = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+              noFilter.searchParams.set('bbox', bbox.join(','));
+              noFilter.searchParams.set('f', 'json');
+              noFilter.searchParams.set('limit', '500');
+              if (USGS_API_KEY) noFilter.searchParams.set('apikey', USGS_API_KEY);
+              nextUrl = noFilter.toString();
+              filterEnabled = false;
+              // Step back pageCount so we redo this page without filter
+              pageCount -= 1;
+              continue;
+            }
             const errorText = resp ? await resp.text().catch(() => '') : '';
             console.warn(`USGS API returned ${resp?.status}: ${resp?.statusText}`);
             console.warn('Error response body:', errorText);

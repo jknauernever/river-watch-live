@@ -427,6 +427,22 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
                 <div>Preflight: {debugInfo?.preflight ? `${debugInfo.preflight.numberReturned ?? 'n/a'} in ${debugInfo.preflight.elapsedMs}ms (exceeds=${debugInfo.preflight.exceeds ? 'yes' : 'no'})` : 'n/a'}</div>
                 <div>Full Count: {debugInfo?.full ? `${debugInfo.full.total} in ${debugInfo.full.pages} pages (${debugInfo.full.elapsedMs}ms)${debugInfo.full.capped ? ' [capped]' : ''}` : debugInfo?.running ? 'running…' : '—'}</div>
                 <div>State: mode={renderMode}, markers={basicGaugeLocations.length}, stations={stations.length}</div>
+                <div>Fetch URL: <button className="underline" onClick={() => {
+                  try {
+                    const ne = map?.getBounds?.()?.getNorthEast();
+                    const sw = map?.getBounds?.()?.getSouthWest();
+                    if (!ne || !sw) return;
+                    const round = (v: number) => Math.round(v * 1000) / 1000;
+                    const b = [round(sw.lng()), round(sw.lat()), round(ne.lng()), round(ne.lat())] as [number, number, number, number];
+                    const url = new URL('https://api.waterdata.usgs.gov/ogcapi/v0/collections/monitoring-locations/items');
+                    url.searchParams.set('bbox', b.join(','));
+                    url.searchParams.set('limit', '500');
+                    url.searchParams.set('f', 'json');
+                    url.searchParams.set('filter-lang', 'cql-text');
+                    url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
+                    window.open(url.toString(), '_blank', 'noopener');
+                  } catch {}
+                }}>open</button></div>
               </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={async () => {
