@@ -53,3 +53,8 @@ npm run dev
 - `src/components/GaugeMarkers.tsx` – renders markers and info windows
 - `src/hooks/useGoogleMaps.ts` – loads and manages the Google Map instance
 - `src/services/usgs-api.ts` – USGS OGC API client
+
+### Working Agreement (Approval Before Changes)
+- Before making any code edits, contributors must first propose a concrete plan of action (what will change and why) and receive explicit approval from the project owner.
+- No code changes should be committed without prior approval of the plan.
+- This rule applies to all edits, including content, configuration, and infrastructure.
