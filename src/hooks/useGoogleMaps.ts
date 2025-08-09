@@ -21,6 +21,7 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
   const [error, setError] = useState<string | null>(null);
   const scriptLoadedRef = useRef(false);
   const placesLoadedRef = useRef(false);
+  const vizLoadedRef = useRef(false);
 
   const loadScript = useCallback(() => {
     return new Promise((resolve, reject) => {
@@ -141,6 +142,29 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
     }
   }, [apiKey]);
 
+  const loadVisualizationLibrary = useCallback(async () => {
+    if (vizLoadedRef.current) return;
+    const { google } = window as any;
+    try {
+      if (typeof google?.maps?.importLibrary === 'function') {
+        await google.maps.importLibrary('visualization');
+      } else {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=visualization&v=weekly&loading=async`;
+          script.async = true;
+          script.defer = true;
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error('Failed to load Visualization library'));
+          document.head.appendChild(script);
+        });
+      }
+      vizLoadedRef.current = true;
+    } catch (e) {
+      console.warn('Failed to load Visualization library:', e);
+    }
+  }, [apiKey]);
+
   const getMap = useCallback((): google.maps.Map | null => {
     return mapInstanceRef.current;
   }, []);
@@ -164,6 +188,7 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
     error,
     initializeMap,
     loadPlacesLibrary,
+    loadVisualizationLibrary,
     getMap,
     resetView
   };

@@ -76,6 +76,7 @@ export class USGSService {
       onProgress?: (fetched: number, total?: number) => void;
       onPage?: (features: USGSMonitoringLocation[], pageIndex: number) => void;
       signal?: AbortSignal;
+      maxFeatures?: number; // when provided, stop after pushing up to this many features
     }
   ): Promise<USGSMonitoringLocation[]> {
     const cacheKey = `locations-${bbox.join(',')}`;
@@ -135,6 +136,10 @@ export class USGSService {
             if (!fid || seenIds.has(fid)) continue;
             seenIds.add(fid);
             aggregated.push(f);
+            if (options?.maxFeatures && aggregated.length >= options.maxFeatures) {
+              nextUrl = null; // stop paging
+              break;
+            }
           }
 
           // Provide page to caller for progressive rendering if not aborted

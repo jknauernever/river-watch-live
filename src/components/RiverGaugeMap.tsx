@@ -18,7 +18,7 @@ interface RiverGaugeMapProps {
 export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   console.log('NEW RiverGaugeMap rendering with apiKey:', apiKey ? 'present' : 'missing');
   
-  const { map, isLoaded, error: mapError, resetView, loadPlacesLibrary } = useGoogleMaps({ apiKey });
+  const { map, isLoaded, error: mapError, resetView, loadPlacesLibrary, loadVisualizationLibrary } = useGoogleMaps({ apiKey });
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [fetchProgress, setFetchProgress] = useState<{ fetched: number; total?: number } | null>(null);
@@ -29,6 +29,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
   const [showVectorLayer, setShowVectorLayer] = useState(false);
+  const heatmapRef = useRef<any>(null);
   const { toast } = useToast();
   const searchInitializedRef = useRef(false);
 
@@ -98,7 +99,27 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       if (total !== null && total > LIMIT) {
         setTooManyInExtent({ total });
         setShowVectorLayer(true);
-        return; // skip marker fetch
+        // Render heatmap overlay
+        try {
+          await loadVisualizationLibrary();
+          const sample = await usgsService.fetchMonitoringLocations(bbox, { maxFeatures: 1000 });
+          const points = sample.map((f: any) => {
+            const [lng, lat] = (f.geometry?.coordinates || f.properties?.coordinates) as [number, number];
+            return new window.google.maps.LatLng(lat, lng);
+          }).filter(Boolean);
+          if (heatmapRef.current) {
+            heatmapRef.current.setMap(null);
+          }
+          heatmapRef.current = new (window as any).google.maps.visualization.HeatmapLayer({
+            data: points,
+            map,
+            radius: 20,
+            dissipating: true,
+          });
+        } catch (e) {
+          console.warn('Heatmap overlay failed:', e);
+        }
+        return; // skip marker fetching
       }
       const locations = await usgsService.getGaugeLocationsOnly(bbox, {
         onProgress: (fetched, total) => {
@@ -346,12 +367,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </div>
       )}
 
-      {/* Vector tile overlay for large extents (placeholder raster style for now) */}
-      {showVectorLayer && (
-        <div className="absolute inset-0 pointer-events-none">
-          {/* In a full implementation, add a vector/raster tile overlay here. */}
-        </div>
-      )}
+      {/* Heatmap overlay is attached directly to the Google Map (no DOM overlay needed) */}
 
       {/* Legend */}
       {showRiverData && (
