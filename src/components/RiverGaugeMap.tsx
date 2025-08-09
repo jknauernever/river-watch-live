@@ -108,7 +108,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           setRenderMode('countUnavailable');
         }
         controller.abort();
-      }, 10000);
+      }, 15000);
 
       let total: number | null = null;
       let proceedWithMarkers = false;
@@ -135,14 +135,14 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         }
       } catch (e) {
         clearTimeout(timer);
-        // On failure, keep gate and show count unavailable
+        // Preflight failed: proceed with capped markers but show count-unavailable banner
         if (requestIdRef.current !== myRequestId) return;
         setCountUnavailable(true);
         setRenderMode('countUnavailable');
-        return;
+        proceedWithMarkers = true;
       }
 
-      if (!proceedWithMarkers) return; // gated or unavailable; no markers
+      if (!proceedWithMarkers) return; // gated: no markers when definitively exceeded
 
       // Proceed to fetch locations; results will be capped via maxFeatures when needed
       const locations = await usgsService.getGaugeLocationsOnly(bbox, {
