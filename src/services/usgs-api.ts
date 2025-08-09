@@ -50,7 +50,11 @@ export class USGSService {
       url.searchParams.set('f', 'json');
       url.searchParams.set('limit', String(threshold + 1));
 
-      const resp = await fetch(url.toString(), {
+      const preflightUrl = url.toString();
+      const start = Date.now();
+      console.info('[USGS preflight] GET', preflightUrl);
+
+      const resp = await fetch(preflightUrl, {
         signal,
         headers: { Accept: 'application/json' },
       });
@@ -60,8 +64,10 @@ export class USGSService {
       }
       const data = await resp.json();
       const numberReturned: number = typeof data.numberReturned === 'number' ? data.numberReturned : Array.isArray(data.features) ? data.features.length : 0;
-      const hasNextLink = Array.isArray(data.links) && data.links.some((l: any) => l?.rel === 'next');
-      const exceedsThreshold = numberReturned >= threshold + 1 || hasNextLink;
+      // IMPORTANT: decide solely on numberReturned relative to (threshold+1)
+      const exceedsThreshold = numberReturned >= threshold + 1;
+      const elapsedMs = Date.now() - start;
+      console.info('[USGS preflight] bbox=', bbox, 'numberReturned=', numberReturned, 'exceeds=', exceedsThreshold, 'elapsedMs=', elapsedMs);
       const result = {
         total: exceedsThreshold ? null : numberReturned,
         exceedsThreshold,
