@@ -159,9 +159,6 @@ export class USGSService {
       // Restrict to surface-water related site types so the preflight reflects gauges
       url.searchParams.set('filter-lang', 'cql-text');
       url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
-      if (USGS_API_KEY) {
-        url.searchParams.set('apikey', USGS_API_KEY);
-      }
 
       const preflightUrl = url.toString();
       const start = Date.now();
@@ -249,9 +246,6 @@ export class USGSService {
         // Restrict to surface-water related site types to reduce payload
         baseUrl.searchParams.set('filter-lang', 'cql-text');
         baseUrl.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
-        if (USGS_API_KEY) {
-          baseUrl.searchParams.set('apikey', USGS_API_KEY);
-        }
 
         let nextUrl: string | null = baseUrl.toString();
         let filterEnabled = true;
