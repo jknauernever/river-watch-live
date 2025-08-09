@@ -95,16 +95,16 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     (loadGaugeLocations as any).abortController = abortController;
     console.log('Starting gauge location load for bbox:', bbox);
     try {
-      const LIMIT = 1000;
+      const LIMIT = 500;
       // Definitive threshold check with limit=1001, with a timeout
       let decided = false;
       const controller = new AbortController();
       const timer = setTimeout(() => {
         if (!decided) {
           if (requestIdRef.current !== myRequestId) return;
-          // proceed with capped markers when count is slow
+          // keep gate when count is slow/unavailable
           setCountUnavailable(true);
-          setRenderMode('markers');
+          setRenderMode('countUnavailable');
         }
         controller.abort();
       }, 10000);
@@ -130,13 +130,14 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         }
       } catch (e) {
         clearTimeout(timer);
-        // On failure, proceed with capped markers and show notice
+        // On failure, keep gate and show count unavailable
         if (requestIdRef.current !== myRequestId) return;
         setCountUnavailable(true);
-        setRenderMode('markers');
+        setRenderMode('countUnavailable');
+        return;
       }
 
-      if (decided && renderMode !== 'markers') return; // blocked; no markers
+      if (decided && renderMode !== 'markers') return; // blocked or unavailable; no markers
 
       // Proceed to fetch locations; results will be capped via maxFeatures when needed
       const locations = await usgsService.getGaugeLocationsOnly(bbox, {
@@ -162,7 +163,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           });
         },
         signal: abortController.signal,
-        maxFeatures: 1000,
+        maxFeatures: 500,
       });
       console.log('Received locations:', locations);
       
@@ -379,9 +380,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
           <Card className="pointer-events-auto">
             <CardContent className="p-3">
-              <div className="text-sm">
-                Too many gauges in view. Zoom in to see up to 1,000 markers.
-              </div>
+              <div className="text-sm">Zoom in closer to see markers.</div>
             </CardContent>
           </Card>
         </div>
@@ -392,9 +391,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
           <Card className="pointer-events-auto">
             <CardContent className="p-3">
-              <div className="text-sm">
-                Gauge count is currently unavailable. Showing up to 1,000 gauges.
-              </div>
+              <div className="text-sm">Gauge count is currently unavailable. Zoom in closer or try again.</div>
             </CardContent>
           </Card>
         </div>
