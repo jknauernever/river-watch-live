@@ -440,7 +440,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
                       url.searchParams.set('bbox', b.join(','));
                       url.searchParams.set('limit', '501');
                       url.searchParams.set('f', 'json');
-                      url.searchParams.set('filter-lang', 'cql2-text');
+                      url.searchParams.set('filter-lang', 'cql-text');
                       url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
                       window.open(url.toString(), '_blank', 'noopener');
                     } catch {}

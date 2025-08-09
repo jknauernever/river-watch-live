@@ -62,16 +62,28 @@ export class USGSService {
       baseUrl.searchParams.set('f', 'json');
       baseUrl.searchParams.set('limit', String(pageLimit));
       // Restrict to surface-water related site types to reflect "gauges" only
-      baseUrl.searchParams.set('filter-lang', 'cql2-text');
+      baseUrl.searchParams.set('filter-lang', 'cql-text');
       baseUrl.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
 
       let nextUrl: string | null = baseUrl.toString();
+      let filterEnabled = true;
 
       while (nextUrl && pages < maxPages) {
         if (options?.signal?.aborted) break;
         pages += 1;
         const resp = await fetch(nextUrl, { signal: options?.signal, headers: { Accept: 'application/json' } });
         if (!resp.ok) {
+          // Fallback: if server rejects filter, retry without it once
+          if (resp.status === 400 && filterEnabled) {
+            const noFilter = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+            noFilter.searchParams.set('bbox', bbox.join(','));
+            noFilter.searchParams.set('f', 'json');
+            noFilter.searchParams.set('limit', String(pageLimit));
+            nextUrl = noFilter.toString();
+            filterEnabled = false;
+            pages -= 1; // redo this page without filter
+            continue;
+          }
           const errorText = await resp.text().catch(() => '');
           throw new Error(`USGS full count failed: ${resp.status} ${resp.statusText} ${errorText}`);
         }
@@ -119,7 +131,7 @@ export class USGSService {
       url.searchParams.set('f', 'json');
       url.searchParams.set('limit', String(threshold + 1));
       // Restrict to surface-water related site types so the preflight reflects gauges
-      url.searchParams.set('filter-lang', 'cql2-text');
+      url.searchParams.set('filter-lang', 'cql-text');
       url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
       if (USGS_API_KEY) {
         url.searchParams.set('apikey', USGS_API_KEY);
