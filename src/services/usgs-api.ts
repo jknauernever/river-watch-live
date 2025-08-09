@@ -242,13 +242,16 @@ export class USGSService {
         const baseUrl = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`));
         baseUrl.searchParams.set('bbox', bbox.join(','));
         baseUrl.searchParams.set('f', 'json');
-        baseUrl.searchParams.set('limit', '500'); // request larger pages when possible
+        const primaryLimit = 500;
+        const smallLimit = 200;
+        baseUrl.searchParams.set('limit', String(primaryLimit)); // request larger pages when possible
         // Restrict to surface-water related site types to reduce payload
         baseUrl.searchParams.set('filter-lang', 'cql-text');
         baseUrl.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
 
         let nextUrl: string | null = baseUrl.toString();
         let filterEnabled = true;
+        let triedSmallerLimit = false;
         let pageCount = 0;
         const maxPages = 10; // hard safety cap to avoid runaway loops
 
@@ -280,17 +283,35 @@ export class USGSService {
               const noFilter = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`));
               noFilter.searchParams.set('bbox', bbox.join(','));
               noFilter.searchParams.set('f', 'json');
-              noFilter.searchParams.set('limit', '500');
-              if (USGS_API_KEY) noFilter.searchParams.set('apikey', USGS_API_KEY);
+              noFilter.searchParams.set('limit', String(primaryLimit));
               nextUrl = noFilter.toString();
               filterEnabled = false;
               // Step back pageCount so we redo this page without filter
               pageCount -= 1;
               continue;
             }
+            // If first page fails, try again with a smaller limit, then proceed gracefully
+            if (pageCount === 1 && !triedSmallerLimit) {
+              console.warn('First page failed; retrying with smaller page size');
+              const smaller = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`));
+              smaller.searchParams.set('bbox', bbox.join(','));
+              smaller.searchParams.set('f', 'json');
+              smaller.searchParams.set('limit', String(smallLimit));
+              smaller.searchParams.set('filter-lang', 'cql-text');
+              smaller.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
+              nextUrl = smaller.toString();
+              triedSmallerLimit = true;
+              pageCount -= 1;
+              continue;
+            }
+
             const errorText = resp ? await resp.text().catch(() => '') : '';
             console.warn(`USGS API returned ${resp?.status}: ${resp?.statusText}`);
             console.warn('Error response body:', errorText);
+            // If we already have some features, stop paging and return them
+            if (aggregated.length > 0) {
+              break;
+            }
             throw new Error(`USGS locations request failed: ${resp?.status ?? 'unknown'}`);
           }
 
