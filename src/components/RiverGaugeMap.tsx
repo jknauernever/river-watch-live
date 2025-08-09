@@ -110,6 +110,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       }, 10000);
 
       let total: number | null = null;
+      let proceedWithMarkers = false;
       try {
         const t0 = Date.now();
         const { total: t, exceedsThreshold } = await usgsService.fetchMonitoringLocationsCount(bbox, controller.signal, LIMIT);
@@ -125,7 +126,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         } else {
           total = t ?? 0;
           if (requestIdRef.current !== myRequestId) return;
+          proceedWithMarkers = true;
           setRenderMode('markers');
+          setTooManyInExtent(null);
+          setCountUnavailable(false);
           decided = true;
         }
       } catch (e) {
@@ -137,7 +141,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         return;
       }
 
-      if (decided && renderMode !== 'markers') return; // blocked or unavailable; no markers
+      if (!proceedWithMarkers) return; // gated or unavailable; no markers
 
       // Proceed to fetch locations; results will be capped via maxFeatures when needed
       const locations = await usgsService.getGaugeLocationsOnly(bbox, {
@@ -183,6 +187,23 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       setBasicGaugeLocations(validLocations);
       setIsUsingDemoData(false);
       console.log(`Loaded ${validLocations.length} gauge locations, isDemo: ${validLocations.length > 0 && validLocations[0].isDemo}`);
+
+      // Auto-enhance: fetch latest heights to color markers
+      try {
+        setIsLoadingData(true);
+        const mapBounds = map.getBounds();
+        if (mapBounds) {
+          const ne2 = mapBounds.getNorthEast();
+          const sw2 = mapBounds.getSouthWest();
+          const bbox2: [number, number, number, number] = [sw2.lng(), sw2.lat(), ne2.lng(), ne2.lat()];
+          const enhancedStations = await usgsService.enhanceGaugeStationsWithData(validLocations, bbox2);
+          setStations(enhancedStations);
+        }
+      } catch (enhanceErr) {
+        console.warn('Auto-enhance water data failed:', enhanceErr);
+      } finally {
+        setIsLoadingData(false);
+      }
     } catch (error) {
       console.error('Error loading gauge locations:', error);
     } finally {
@@ -307,7 +328,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       <MapContainer />
       
       {/* Markers Component */}
-      {renderMode === 'markers' && (
+      {basicGaugeLocations.length > 0 && (
         <GaugeMarkers 
           map={map}
           basicLocations={basicGaugeLocations}
@@ -405,6 +426,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
                 <div>BBox: {JSON.stringify(debugInfo?.bbox || [])}</div>
                 <div>Preflight: {debugInfo?.preflight ? `${debugInfo.preflight.numberReturned ?? 'n/a'} in ${debugInfo.preflight.elapsedMs}ms (exceeds=${debugInfo.preflight.exceeds ? 'yes' : 'no'})` : 'n/a'}</div>
                 <div>Full Count: {debugInfo?.full ? `${debugInfo.full.total} in ${debugInfo.full.pages} pages (${debugInfo.full.elapsedMs}ms)${debugInfo.full.capped ? ' [capped]' : ''}` : debugInfo?.running ? 'running…' : '—'}</div>
+                <div>State: mode={renderMode}, markers={basicGaugeLocations.length}, stations={stations.length}</div>
               </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={async () => {
