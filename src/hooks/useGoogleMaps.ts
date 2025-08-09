@@ -89,6 +89,24 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
         zoom: 9,
         center: { lat: 47.6062, lng: -122.3321 }, // Puget Sound, Washington
         mapTypeId: 'terrain',
+        // Standard Google UI controls
+        zoomControl: true,
+        zoomControlOptions: { position: google.maps.ControlPosition.RIGHT_BOTTOM },
+        mapTypeControl: true,
+        mapTypeControlOptions: {
+          style: google.maps.MapTypeControlStyle.DEFAULT,
+          position: google.maps.ControlPosition.TOP_RIGHT,
+          mapTypeIds: [
+            google.maps.MapTypeId.ROADMAP,
+            google.maps.MapTypeId.TERRAIN,
+            google.maps.MapTypeId.SATELLITE,
+            google.maps.MapTypeId.HYBRID,
+          ],
+        },
+        fullscreenControl: true,
+        fullscreenControlOptions: { position: google.maps.ControlPosition.RIGHT_TOP },
+        scaleControl: true,
+        streetViewControl: false,
         styles: [
           {
             featureType: 'water',
@@ -101,6 +119,20 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
             stylers: [{ color: '#1a73e8' }]
           }
         ]
+      });
+
+      // Restore last chosen map type if available
+      try {
+        const savedType = localStorage.getItem('gm_map_type') as google.maps.MapTypeId | null;
+        if (savedType) map.setMapTypeId(savedType);
+      } catch {}
+
+      // Persist map type changes
+      google.maps.event.addListener(map, 'maptypeid_changed', () => {
+        try {
+          const typeId = map.getMapTypeId();
+          localStorage.setItem('gm_map_type', typeId as string);
+        } catch {}
       });
 
       mapInstanceRef.current = map;
