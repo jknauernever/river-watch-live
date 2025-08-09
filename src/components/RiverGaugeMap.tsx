@@ -103,10 +103,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         if (!decided) {
           if (requestIdRef.current !== myRequestId) return;
           setCountUnavailable(true);
-          setRenderMode('countUnavailable');
+          setRenderMode('markers'); // proceed with capped markers when count unavailable
         }
         controller.abort();
-      }, 4000);
+      }, 10000);
 
       let total: number | null = null;
       try {
@@ -129,21 +129,16 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         }
       } catch (e) {
         clearTimeout(timer);
-        // On failure, show count unavailable and block markers per policy
+        // On failure, proceed with capped markers and show non-blocking notice
         if (requestIdRef.current !== myRequestId) return;
         setCountUnavailable(true);
-        setRenderMode('countUnavailable');
-        setBasicGaugeLocations([]);
-        return;
+        setRenderMode('markers');
+        // continue to fetch with maxFeatures cap
       }
 
       if (decided && renderMode !== 'markers') return; // blocked or unavailable; no markers
 
-      if (total !== null && total <= LIMIT) {
-        // Proceed to normal marker fetch below
-      } else {
-        return; // guard
-      }
+      // Proceed to fetch locations; results will be capped via maxFeatures when needed
       const locations = await usgsService.getGaugeLocationsOnly(bbox, {
         onProgress: (fetched, total) => {
           setFetchProgress({ fetched, total });
@@ -393,12 +388,12 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       )}
 
       {/* Count unavailable notice */}
-      {renderMode === 'countUnavailable' && (
+      {countUnavailable && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
           <Card className="pointer-events-auto">
             <CardContent className="p-3">
               <div className="text-sm">
-                Gauge count is currently unavailable. Zoom in or try again.
+                Gauge count is currently unavailable. Showing up to 1,000 gauges.
               </div>
             </CardContent>
           </Card>

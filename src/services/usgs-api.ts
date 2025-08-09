@@ -115,31 +115,55 @@ export class USGSService {
       url.searchParams.set('bbox', bbox.join(','));
       url.searchParams.set('f', 'json');
       url.searchParams.set('limit', String(threshold + 1));
+      if (USGS_API_KEY) {
+        url.searchParams.set('apikey', USGS_API_KEY);
+      }
 
       const preflightUrl = url.toString();
       const start = Date.now();
       console.info('[USGS preflight] GET', preflightUrl);
 
-      const resp = await fetch(preflightUrl, {
-        signal,
-        headers: { Accept: 'application/json' },
-      });
-      if (!resp.ok) {
-        const errorText = await resp.text().catch(() => '');
-        throw new Error(`USGS count failed: ${resp.status} ${resp.statusText} ${errorText}`);
+      // Retry with simple exponential backoff for 429/5xx
+      let attempt = 0;
+      const maxAttempts = 3;
+      let lastError: any = null;
+      while (attempt < maxAttempts) {
+        try {
+          const resp = await fetch(preflightUrl, {
+            signal,
+            headers: { Accept: 'application/json' },
+          });
+          if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
+            const retryAfter = Number(resp.headers.get('retry-after'));
+            const delayMs = !isNaN(retryAfter) ? retryAfter * 1000 : 500 * Math.pow(2, attempt);
+            await new Promise((r) => setTimeout(r, delayMs));
+            attempt += 1;
+            continue;
+          }
+          if (!resp.ok) {
+            const errorText = await resp.text().catch(() => '');
+            throw new Error(`USGS count failed: ${resp.status} ${resp.statusText} ${errorText}`);
+          }
+          const data = await resp.json();
+          const numberReturned: number = typeof data.numberReturned === 'number' ? data.numberReturned : Array.isArray(data.features) ? data.features.length : 0;
+          const exceedsThreshold = numberReturned >= threshold + 1;
+          const elapsedMs = Date.now() - start;
+          console.info('[USGS preflight] bbox=', bbox, 'numberReturned=', numberReturned, 'exceeds=', exceedsThreshold, 'elapsedMs=', elapsedMs);
+          const result = {
+            total: exceedsThreshold ? null : numberReturned,
+            exceedsThreshold,
+          };
+          this.setCache(cacheKey, result);
+          return result;
+        } catch (err) {
+          lastError = err;
+          if ((err as any)?.name === 'AbortError') throw err;
+          // backoff before next try
+          await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+          attempt += 1;
+        }
       }
-      const data = await resp.json();
-      const numberReturned: number = typeof data.numberReturned === 'number' ? data.numberReturned : Array.isArray(data.features) ? data.features.length : 0;
-      // IMPORTANT: decide solely on numberReturned relative to (threshold+1)
-      const exceedsThreshold = numberReturned >= threshold + 1;
-      const elapsedMs = Date.now() - start;
-      console.info('[USGS preflight] bbox=', bbox, 'numberReturned=', numberReturned, 'exceeds=', exceedsThreshold, 'elapsedMs=', elapsedMs);
-      const result = {
-        total: exceedsThreshold ? null : numberReturned,
-        exceedsThreshold,
-      };
-      this.setCache(cacheKey, result);
-      return result;
+      throw lastError ?? new Error('USGS preflight failed');
     })();
 
     this.requestQueue.set(cacheKey, requestPromise);
@@ -184,6 +208,9 @@ export class USGSService {
         baseUrl.searchParams.set('bbox', bbox.join(','));
         baseUrl.searchParams.set('f', 'json');
         baseUrl.searchParams.set('limit', '500'); // request larger pages when possible
+        if (USGS_API_KEY) {
+          baseUrl.searchParams.set('apikey', USGS_API_KEY);
+        }
 
         let nextUrl: string | null = baseUrl.toString();
         let pageCount = 0;
@@ -196,12 +223,24 @@ export class USGSService {
           }
           pageCount += 1;
           console.log(`Fetching monitoring-locations page ${pageCount}:`, nextUrl);
-          const resp = await fetch(nextUrl, { signal: options?.signal });
-          if (!resp.ok) {
-            const errorText = await resp.text();
-            console.warn(`USGS API returned ${resp.status}: ${resp.statusText}`);
+          let attempts = 0;
+          let resp: Response | null = null;
+          while (attempts < 4) {
+            resp = await fetch(nextUrl, { signal: options?.signal });
+            if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
+              const retryAfter = Number(resp.headers.get('retry-after'));
+              const delayMs = !isNaN(retryAfter) ? retryAfter * 1000 : 500 * Math.pow(2, attempts);
+              await new Promise((r) => setTimeout(r, delayMs));
+              attempts += 1;
+              continue;
+            }
+            break;
+          }
+          if (!resp || !resp.ok) {
+            const errorText = resp ? await resp.text().catch(() => '') : '';
+            console.warn(`USGS API returned ${resp?.status}: ${resp?.statusText}`);
             console.warn('Error response body:', errorText);
-            throw new Error(`USGS locations request failed: ${resp.status}`);
+            throw new Error(`USGS locations request failed: ${resp?.status ?? 'unknown'}`);
           }
 
           const page = await resp.json();
@@ -269,6 +308,11 @@ export class USGSService {
     // Store the promise in the queue
     this.requestQueue.set(cacheKey, requestPromise);
     return requestPromise;
+  }
+  
+  // Provide an empty demo dataset fallback to avoid build errors and accidental fake data
+  private async generateDemoLocations(bbox: [number, number, number, number]): Promise<USGSMonitoringLocation[]> {
+    return [];
   }
   
   // Demo locations removed to prevent any non-official data from showing in production
@@ -469,7 +513,7 @@ export class USGSService {
       const stations: GaugeStation[] = basicStations.map(station => {
         const latestValue = bulkGaugeData.get(station.siteId);
         const height = latestValue?.properties?.value;
-        const waterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
+        const waterLevel: WaterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
         
         console.log(`Station ${station.siteId}: height=${height}, waterLevel=`, waterLevel);
 
@@ -499,7 +543,7 @@ export class USGSService {
         console.log(`Latest value for ${station.siteId}:`, latestValue);
         
         const height = latestValue?.properties?.value;
-        const waterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
+        const waterLevel: WaterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
         console.log(`Station ${station.siteId}: height=${height}, waterLevel=`, waterLevel);
 
         return {
