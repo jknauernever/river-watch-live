@@ -566,12 +566,10 @@ export class USGSService {
       const bulkGaugeData = await this.fetchBulkGaugeData(bbox);
       
       const stations: GaugeStation[] = basicStations.map(station => {
-        const latestValue = bulkGaugeData.get(station.siteId);
+        const latestValue = bulkGaugeData.get(station.siteId) || bulkGaugeData.get(station.id);
         const height = latestValue?.properties?.value;
         const waterLevel: WaterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
         
-        console.log(`Station ${station.siteId}: height=${height}, waterLevel=`, waterLevel);
-
         return {
           id: station.id,
           name: station.name,
@@ -583,7 +581,37 @@ export class USGSService {
         };
       });
 
-      console.log(`Successfully enhanced ${stations.length} gauge stations with bulk water data`);
+      // Fallback: for stations without bulk data, fetch individually in small batches
+      const missing = stations
+        .map((s, idx) => ({ s, idx }))
+        .filter(x => typeof x.s.latestHeight !== 'number')
+        .map(x => x.idx);
+
+      if (missing.length > 0) {
+        const batchSize = 12;
+        for (let i = 0; i < missing.length; i += batchSize) {
+          const slice = missing.slice(i, i + batchSize);
+          const promises = slice.map(async (idx) => {
+            const siteId = stations[idx].siteId;
+            const latest = await this.fetchLatestValue(siteId);
+            const height = latest?.properties?.value;
+            if (typeof height === 'number') {
+              stations[idx] = {
+                ...stations[idx],
+                latestHeight: height,
+                waterLevel: calculateWaterLevel(height),
+                lastUpdated: latest?.properties?.datetime,
+              };
+            }
+          });
+          await Promise.allSettled(promises);
+          if (i + batchSize < missing.length) {
+            await new Promise(r => setTimeout(r, 120));
+          }
+        }
+      }
+
+      console.log(`Enhanced ${stations.length} stations; with data: ${stations.filter(s => typeof s.latestHeight === 'number').length}`);
       return stations;
     }
 
