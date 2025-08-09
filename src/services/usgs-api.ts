@@ -30,6 +30,72 @@ export class USGSService {
     return null;
   }
 
+  // Exhaustive count for debugging: page through all features and return total
+  async fetchMonitoringLocationsFullCount(
+    bbox: [number, number, number, number],
+    options?: {
+      signal?: AbortSignal;
+      pageLimit?: number; // default 500
+      maxPages?: number;  // safety cap
+      onProgress?: (pages: number, counted: number) => void;
+    }
+  ): Promise<{ total: number; pages: number; elapsedMs: number; capped: boolean }> {
+    const pageLimit = options?.pageLimit ?? 500;
+    const maxPages = options?.maxPages ?? 200;
+    const cacheKey = `fullcount-${bbox.join(',')}-${pageLimit}`;
+
+    const cached = this.getCached<{ total: number; pages: number; elapsedMs: number; capped: boolean }>(cacheKey);
+    if (cached) return cached;
+
+    if (this.requestQueue.has(cacheKey)) {
+      return this.requestQueue.get(cacheKey)!;
+    }
+
+    const requestPromise = (async () => {
+      const start = Date.now();
+      let pages = 0;
+      let counted = 0;
+      let capped = false;
+
+      const baseUrl = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+      baseUrl.searchParams.set('bbox', bbox.join(','));
+      baseUrl.searchParams.set('f', 'json');
+      baseUrl.searchParams.set('limit', String(pageLimit));
+
+      let nextUrl: string | null = baseUrl.toString();
+
+      while (nextUrl && pages < maxPages) {
+        if (options?.signal?.aborted) break;
+        pages += 1;
+        const resp = await fetch(nextUrl, { signal: options?.signal, headers: { Accept: 'application/json' } });
+        if (!resp.ok) {
+          const errorText = await resp.text().catch(() => '');
+          throw new Error(`USGS full count failed: ${resp.status} ${resp.statusText} ${errorText}`);
+        }
+        const data = await resp.json();
+        const features = Array.isArray(data.features) ? data.features : [];
+        counted += features.length;
+        options?.onProgress?.(pages, counted);
+        const nextLink = Array.isArray(data.links) ? data.links.find((l: any) => l?.rel === 'next' && typeof l.href === 'string') : null;
+        nextUrl = nextLink?.href || null;
+        if (!nextUrl) break;
+      }
+
+      if (pages >= maxPages && nextUrl) capped = true;
+      const elapsedMs = Date.now() - start;
+      const result = { total: counted, pages, elapsedMs, capped };
+      this.setCache(cacheKey, result);
+      return result;
+    })();
+
+    this.requestQueue.set(cacheKey, requestPromise);
+    try {
+      return await requestPromise;
+    } finally {
+      this.requestQueue.delete(cacheKey);
+    }
+  }
+
   // Threshold preflight: single request with limit=1001. If numberReturned==1001 or a next link exists → exceeds threshold.
   async fetchMonitoringLocationsCount(
     bbox: [number, number, number, number],

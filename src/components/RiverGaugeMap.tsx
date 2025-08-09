@@ -31,6 +31,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [countUnavailable, setCountUnavailable] = useState(false);
   const [renderMode, setRenderMode] = useState<'loading' | 'blocked' | 'markers' | 'countUnavailable'>('loading');
   const requestIdRef = useRef(0);
+  const debugEnabled = useRef<boolean>((() => {
+    try { return new URLSearchParams(window.location.search).get('debug') === '1'; } catch { return false; }
+  })());
+  const [debugInfo, setDebugInfo] = useState<{ bbox: [number, number, number, number]; preflight?: { numberReturned?: number; elapsedMs?: number; exceeds?: boolean }; full?: { total: number; pages: number; elapsedMs: number; capped: boolean } | null; running: boolean } | null>(null);
   const preflightPendingRef = useRef(false);
   const { toast } = useToast();
   const searchInitializedRef = useRef(false);
@@ -109,8 +113,12 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
       let total: number | null = null;
       try {
+        const t0 = Date.now();
         const { total: t, exceedsThreshold } = await usgsService.fetchMonitoringLocationsCount(bbox, controller.signal, LIMIT);
         clearTimeout(timer);
+        if (debugEnabled.current) {
+          setDebugInfo(prev => ({ ...(prev || { bbox }), bbox, preflight: { numberReturned: t ?? undefined, elapsedMs: Date.now() - t0, exceeds: exceedsThreshold }, full: prev?.full ?? null, running: false }));
+        }
         if (exceedsThreshold) {
           if (requestIdRef.current !== myRequestId) return;
           setTooManyInExtent({ total: 1001 });
@@ -400,7 +408,40 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </div>
       )}
 
-      {/* Heatmap disabled per updated policy */}
+      {/* Debug overlay */}
+      {debugEnabled.current && (
+        <div className="absolute top-24 left-4 z-10 pointer-events-none">
+          <Card className="pointer-events-auto">
+            <CardContent className="p-3 space-y-2">
+              <div className="text-xs font-mono">
+                <div>BBox: {JSON.stringify(debugInfo?.bbox || [])}</div>
+                <div>Preflight: {debugInfo?.preflight ? `${debugInfo.preflight.numberReturned ?? 'n/a'} in ${debugInfo.preflight.elapsedMs}ms (exceeds=${debugInfo.preflight.exceeds ? 'yes' : 'no'})` : 'n/a'}</div>
+                <div>Full Count: {debugInfo?.full ? `${debugInfo.full.total} in ${debugInfo.full.pages} pages (${debugInfo.full.elapsedMs}ms)${debugInfo.full.capped ? ' [capped]' : ''}` : debugInfo?.running ? 'running…' : '—'}</div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={async () => {
+                  try {
+                    const bounds = map?.getBounds?.();
+                    const b = bounds ? (() => {
+                      const ne = bounds.getNorthEast();
+                      const sw = bounds.getSouthWest();
+                      const round = (v: number) => Math.round(v * 1000) / 1000;
+                      return [round(sw.lng()), round(sw.lat()), round(ne.lng()), round(ne.lat())] as [number, number, number, number];
+                    })() : (debugInfo?.bbox || [0,0,0,0] as any);
+                    setDebugInfo(prev => ({ ...(prev || { bbox: b }), bbox: b, running: true }));
+                    const controller = new AbortController();
+                    const result = await usgsService.fetchMonitoringLocationsFullCount(b, { signal: controller.signal, onProgress: () => {} });
+                    setDebugInfo(prev => ({ ...(prev || { bbox: b }), bbox: b, preflight: prev?.preflight, full: result, running: false }));
+                  } catch (e) {
+                    setDebugInfo(prev => ({ ...(prev || ({} as any)), running: false }));
+                  }
+                }}>Run full count</Button>
+                <Button size="sm" variant="ghost" onClick={() => { try { navigator.clipboard.writeText(JSON.stringify(debugInfo, null, 2)); } catch {} }}>Copy</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Legend */}
       {showRiverData && (
