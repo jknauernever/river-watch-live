@@ -80,7 +80,7 @@ export class USGSService {
             const errorText = await resp.text();
             console.warn(`USGS API returned ${resp.status}: ${resp.statusText}`);
             console.warn('Error response body:', errorText);
-            break;
+            throw new Error(`USGS locations request failed: ${resp.status}`);
           }
 
           const page = await resp.json();
@@ -114,10 +114,7 @@ export class USGSService {
           nextUrl = nextLink?.href || null;
         }
 
-        if (aggregated.length === 0) {
-          console.log('No locations returned; falling back to demo data');
-          return this.generateDemoLocations(bbox);
-        }
+        // May legitimately return an empty array when no sites in bbox
 
         console.log(`Aggregated ${aggregated.length} monitoring locations across ${pageCount} page(s)`);
         this.setCache(cacheKey, aggregated);
@@ -138,42 +135,7 @@ export class USGSService {
     return requestPromise;
   }
   
-  // Generate demo locations when API is unavailable - spread across current view
-  generateDemoLocations(bbox: [number, number, number, number]): USGSMonitoringLocation[] {
-    const [minLng, minLat, maxLng, maxLat] = bbox;
-    
-    // Generate gauges distributed across the visible map area
-    const demoSites = [
-      { name: "Skagit River at Mount Vernon", coordinates: [minLng + (maxLng - minLng) * 0.3, minLat + (maxLat - minLat) * 0.8], siteId: "DEMO001" },
-      { name: "Snoqualmie River near Carnation", coordinates: [minLng + (maxLng - minLng) * 0.6, minLat + (maxLat - minLat) * 0.7], siteId: "DEMO002" },
-      { name: "Green River at Auburn", coordinates: [minLng + (maxLng - minLng) * 0.4, minLat + (maxLat - minLat) * 0.3], siteId: "DEMO003" },
-      { name: "Duwamish River at Tukwila", coordinates: [minLng + (maxLng - minLng) * 0.5, minLat + (maxLat - minLat) * 0.5], siteId: "DEMO004" },
-      { name: "Cedar River at Renton", coordinates: [minLng + (maxLng - minLng) * 0.7, minLat + (maxLat - minLat) * 0.4], siteId: "DEMO005" },
-      { name: "White River at Pacific", coordinates: [minLng + (maxLng - minLng) * 0.8, minLat + (maxLat - minLat) * 0.2], siteId: "DEMO006" },
-      { name: "Puyallup River at Puyallup", coordinates: [minLng + (maxLng - minLng) * 0.2, minLat + (maxLat - minLat) * 0.6], siteId: "DEMO007" },
-      { name: "Nisqually River at McKenna", coordinates: [minLng + (maxLng - minLng) * 0.9, minLat + (maxLat - minLat) * 0.9], siteId: "DEMO008" },
-    ];
-    
-    // All demo sites should now be visible within the current map bounds
-    const demoLocations: USGSMonitoringLocation[] = demoSites.map((site) => ({
-      id: site.siteId,
-      properties: {
-        name: site.name,
-        site_id: site.siteId,
-        coordinates: site.coordinates as [number, number],
-        site_type_cd: 'ST', // Stream
-        monitoring_location_number: site.siteId,
-        monitoring_location_name: site.name,
-      },
-      geometry: {
-        type: 'Point',
-        coordinates: site.coordinates
-      }
-    } as any));
-    
-    console.log(`Generated ${demoLocations.length} demo locations distributed across current map view`);
-    return demoLocations;
-  }
+  // Demo locations removed to prevent any non-official data from showing in production
   async getGaugeLocationsOnly(
     bbox: [number, number, number, number],
     options?: {
@@ -192,9 +154,7 @@ export class USGSService {
     const locations = await this.fetchMonitoringLocations(bbox, options);
     
     // Check if any location has a demo site ID to determine if we're using demo data
-    const isUsingDemoData = locations.some((location: any) => 
-      location.id?.startsWith('DEMO') || location.properties?.site_id?.startsWith('DEMO')
-    );
+    const isUsingDemoData = false;
     
     // Filter for surface water sites and return basic info only
     const surfaceWaterSites = locations.filter((location: any) => {
@@ -262,7 +222,7 @@ export class USGSService {
         siteId: location.properties?.monitoring_location_number,
         coordinates: [lng, lat] as [number, number],
         siteType: location.properties?.site_type_cd || location.properties?.site_type_code || 'ST',
-        isDemo: isUsingDemoData
+        isDemo: false
       };
     }).filter(Boolean) as { 
       id: string; 
@@ -371,8 +331,8 @@ export class USGSService {
       
       const stations: GaugeStation[] = basicStations.map(station => {
         const latestValue = bulkGaugeData.get(station.siteId);
-        const height = latestValue?.properties?.value ?? Math.random() * 10; // Demo data if no real data
-        const waterLevel = calculateWaterLevel(height);
+        const height = latestValue?.properties?.value;
+        const waterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
         
         console.log(`Station ${station.siteId}: height=${height}, waterLevel=`, waterLevel);
 
@@ -401,8 +361,8 @@ export class USGSService {
         const latestValue = await this.fetchLatestValue(station.siteId);
         console.log(`Latest value for ${station.siteId}:`, latestValue);
         
-        const height = latestValue?.properties?.value ?? Math.random() * 10; // Demo data if no real data
-        const waterLevel = calculateWaterLevel(height);
+        const height = latestValue?.properties?.value;
+        const waterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
         console.log(`Station ${station.siteId}: height=${height}, waterLevel=`, waterLevel);
 
         return {

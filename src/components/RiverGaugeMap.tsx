@@ -121,7 +121,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
       console.log(`Filtered ${validLocations.length} valid locations from ${locations.length} total`);
       setBasicGaugeLocations(validLocations);
-      setIsUsingDemoData(validLocations.length > 0 && validLocations[0].isDemo);
+      setIsUsingDemoData(false);
       console.log(`Loaded ${validLocations.length} gauge locations, isDemo: ${validLocations.length > 0 && validLocations[0].isDemo}`);
     } catch (error) {
       console.error('Error loading gauge locations:', error);

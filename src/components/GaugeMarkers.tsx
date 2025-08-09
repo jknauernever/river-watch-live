@@ -250,7 +250,7 @@ export const GaugeMarkers = ({
     };
 
     const targets: Array<{ id: string; lat: number; lng: number; title: string; color?: string }> = showRiverData
-      ? stations.map(s => ({ id: s.id, lat: s.coordinates[1], lng: s.coordinates[0], title: s.name, color: s.waterLevel.color }))
+      ? stations.map(s => ({ id: s.id, lat: s.coordinates[1], lng: s.coordinates[0], title: s.name, color: (typeof s.latestHeight === 'number') ? s.waterLevel.color : '#1e90ff' }))
       : basicLocations.map(l => ({ id: l.siteId, lat: l.coordinates[1], lng: l.coordinates[0], title: l.name }));
 
     const nextIds = new Set(targets.map(t => t.id));
