@@ -1,7 +1,32 @@
 import { USGSMonitoringLocation, USGSLatestValue, GaugeStation, WaterLevel, USGSHistoricalData } from '@/types/usgs';
 
 const USGS_BASE_URL = 'https://api.waterdata.usgs.gov/ogcapi/v0';
-const USGS_API_KEY: string = (import.meta as any)?.env?.VITE_USGS_API_KEY ?? '';
+const ENV_USGS_API_KEY: string = (import.meta as any)?.env?.VITE_USGS_API_KEY ?? '';
+
+function getUSGSApiKey(): string {
+  try {
+    const local = (typeof window !== 'undefined') ? localStorage.getItem('usgs-api-key') : '';
+    return (local && local.trim()) || ENV_USGS_API_KEY;
+  } catch {
+    return ENV_USGS_API_KEY;
+  }
+}
+
+function ensureApiKey(url: URL): URL {
+  const key = getUSGSApiKey();
+  if (key && !url.searchParams.has('apikey')) url.searchParams.set('apikey', key);
+  return url;
+}
+
+function ensureApiKeyOnString(urlString: string | null): string | null {
+  if (!urlString) return null;
+  try {
+    const u = new URL(urlString);
+    return ensureApiKey(u).toString();
+  } catch {
+    return urlString;
+  }
+}
 
 // Calculate water level based on gage height value
 function calculateWaterLevel(value: number): WaterLevel {
@@ -57,7 +82,7 @@ export class USGSService {
       let counted = 0;
       let capped = false;
 
-      const baseUrl = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+      const baseUrl = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`));
       baseUrl.searchParams.set('bbox', bbox.join(','));
       baseUrl.searchParams.set('f', 'json');
       baseUrl.searchParams.set('limit', String(pageLimit));
@@ -71,11 +96,12 @@ export class USGSService {
       while (nextUrl && pages < maxPages) {
         if (options?.signal?.aborted) break;
         pages += 1;
-        const resp = await fetch(nextUrl, { signal: options?.signal, headers: { Accept: 'application/json' } });
+        nextUrl = ensureApiKeyOnString(nextUrl);
+        const resp = await fetch(nextUrl!, { signal: options?.signal, headers: { Accept: 'application/json' } });
         if (!resp.ok) {
           // Fallback: if server rejects filter, retry without it once
           if (resp.status === 400 && filterEnabled) {
-            const noFilter = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+            const noFilter = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`));
             noFilter.searchParams.set('bbox', bbox.join(','));
             noFilter.searchParams.set('f', 'json');
             noFilter.searchParams.set('limit', String(pageLimit));
@@ -126,7 +152,7 @@ export class USGSService {
     }
 
     const requestPromise = (async () => {
-      const url = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`));
       url.searchParams.set('bbox', bbox.join(','));
       url.searchParams.set('f', 'json');
       url.searchParams.set('limit', String(threshold + 1));
@@ -216,7 +242,7 @@ export class USGSService {
         // We follow rel="next" links until exhausted or a sensible cap is reached
         const aggregated: USGSMonitoringLocation[] = [];
         const seenIds = new Set<string>();
-        const baseUrl = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+        const baseUrl = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`));
         baseUrl.searchParams.set('bbox', bbox.join(','));
         baseUrl.searchParams.set('f', 'json');
         baseUrl.searchParams.set('limit', '500'); // request larger pages when possible
@@ -242,7 +268,8 @@ export class USGSService {
           let attempts = 0;
           let resp: Response | null = null;
           while (attempts < 4) {
-            resp = await fetch(nextUrl, { signal: options?.signal });
+            nextUrl = ensureApiKeyOnString(nextUrl);
+            resp = await fetch(nextUrl!, { signal: options?.signal });
             if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
               const retryAfter = Number(resp.headers.get('retry-after'));
               const delayMs = !isNaN(retryAfter) ? retryAfter * 1000 : 500 * Math.pow(2, attempts);
@@ -256,7 +283,7 @@ export class USGSService {
             // If server rejects filter usage, retry once without filter starting at this page
             if (resp && resp.status === 400 && filterEnabled) {
               console.warn('400 with filter; retrying without filter for paging');
-              const noFilter = new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`);
+              const noFilter = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`));
               noFilter.searchParams.set('bbox', bbox.join(','));
               noFilter.searchParams.set('f', 'json');
               noFilter.searchParams.set('limit', '500');
@@ -451,7 +478,7 @@ export class USGSService {
     if (cached) return cached;
 
     try {
-      const url = new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`);
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`));
       
       url.searchParams.set('monitoring_location_id', siteId);
       url.searchParams.set('parameter_code', '00065'); // Gage height
@@ -490,16 +517,14 @@ export class USGSService {
     console.log('Fetching bulk gauge data for bbox:', bbox);
     
     try {
-      const url = new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`);
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`));
       
       // Get all gauge height data in the bbox in one request
       url.searchParams.set('bbox', bbox.join(','));
       url.searchParams.set('parameter_code', '00065'); // Gage height only
       url.searchParams.set('f', 'json');
       url.searchParams.set('limit', '1000');
-      if (USGS_API_KEY) {
-        url.searchParams.set('apikey', USGS_API_KEY);
-      }
+      // API key ensured above
 
       console.log('Making bulk gauge data request to:', url.toString());
       const response = await fetch(url.toString());
@@ -673,7 +698,7 @@ export class USGSService {
     if (cached) return cached;
 
     try {
-      const url = new URL(`${USGS_BASE_URL}/collections/daily-values/items`);
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
       
       url.searchParams.set('monitoring_location_id', siteId);
       url.searchParams.set('parameter_code', '00065');
@@ -681,10 +706,7 @@ export class USGSService {
       url.searchParams.set('end', endDate);
       url.searchParams.set('f', 'json');
       url.searchParams.set('limit', '1000');
-      // Only include API key if provided via env; otherwise omit to avoid CORS/auth issues
-      if (USGS_API_KEY) {
-        url.searchParams.set('apikey', USGS_API_KEY);
-      }
+      // API key ensured above
 
       const response = await fetch(url.toString());
       if (!response.ok) {

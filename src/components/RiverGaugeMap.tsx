@@ -468,6 +468,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
                     url.searchParams.set('f', 'json');
                     url.searchParams.set('filter-lang', 'cql-text');
                     url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
+                    const k = (import.meta as any)?.env?.VITE_USGS_API_KEY;
+                    if (k) url.searchParams.set('apikey', k);
                     window.open(url.toString(), '_blank', 'noopener');
                   } catch {}
                 }}>open</button></div>
@@ -508,6 +510,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
                       url.searchParams.set('f', 'json');
                       url.searchParams.set('filter-lang', 'cql-text');
                       url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
+                      const k = (import.meta as any)?.env?.VITE_USGS_API_KEY;
+                      if (k) url.searchParams.set('apikey', k);
                       window.open(url.toString(), '_blank', 'noopener');
                     } catch {}
                   }}
