@@ -28,6 +28,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [showRiverData, setShowRiverData] = useState(false);
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
+  const [countUnavailable, setCountUnavailable] = useState(false);
   const [showVectorLayer, setShowVectorLayer] = useState(false);
   const heatmapRef = useRef<any>(null);
   const { toast } = useToast();
@@ -81,6 +82,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     setIsLoading(true);
     setFetchProgress({ fetched: 0, total: undefined });
     setTooManyInExtent(null);
+    setCountUnavailable(false);
     setShowVectorLayer(false);
     // Cancel any in-flight request
     (loadGaugeLocations as any).abortController?.abort?.();
@@ -94,9 +96,20 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       try {
         total = await usgsService.fetchMonitoringLocationsCount(bbox);
       } catch (countErr) {
-        console.warn('Count preflight failed; falling back to direct fetch', countErr);
+        console.warn('Count preflight failed; blocking markers per policy', countErr);
       }
-      if (total !== null && total > LIMIT) {
+      if (total === null) {
+        // Strict block when count unavailable
+        setCountUnavailable(true);
+        setShowVectorLayer(false);
+        setBasicGaugeLocations([]);
+        if (heatmapRef.current) {
+          heatmapRef.current.setMap(null);
+          heatmapRef.current = null;
+        }
+        return;
+      }
+      if (total > LIMIT) {
         setTooManyInExtent({ total });
         setShowVectorLayer(true);
         // Render heatmap overlay
@@ -110,11 +123,20 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           if (heatmapRef.current) {
             heatmapRef.current.setMap(null);
           }
+          const subtleGradient = [
+            'rgba(0, 0, 255, 0)',
+            'rgba(0, 128, 255, 0.15)',
+            'rgba(0, 128, 255, 0.3)',
+            'rgba(0, 128, 255, 0.5)',
+            'rgba(0, 128, 255, 0.7)'
+          ];
           heatmapRef.current = new (window as any).google.maps.visualization.HeatmapLayer({
             data: points,
             map,
-            radius: 20,
+            radius: 14,
             dissipating: true,
+            opacity: 0.45,
+            gradient: subtleGradient,
           });
         } catch (e) {
           console.warn('Heatmap overlay failed:', e);
@@ -360,7 +382,20 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           <Card>
             <CardContent className="p-3">
               <div className="text-sm">
-                Too many gauges in view ({tooManyInExtent.total.toLocaleString()}). Zoom in to see up to 1,000 markers.
+                Too many gauges in view ({tooManyInExtent.total.toLocaleString()}). Showing a density preview. Zoom in to see individual gauges (up to 1,000).
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Count unavailable notice */}
+      {countUnavailable && (
+        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10">
+          <Card>
+            <CardContent className="p-3">
+              <div className="text-sm">
+                Gauge count is currently unavailable. Zoom in or try again.
               </div>
             </CardContent>
           </Card>
