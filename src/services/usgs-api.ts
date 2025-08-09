@@ -91,7 +91,7 @@ export class USGSService {
       maxFeatures?: number; // when provided, stop after pushing up to this many features
     }
   ): Promise<USGSMonitoringLocation[]> {
-    const cacheKey = `locations-${bbox.join(',')}`;
+    const cacheKey = `locations-${bbox.join(',')}-${options?.maxFeatures ?? 'all'}`;
     const cached = this.getCached<USGSMonitoringLocation[]>(cacheKey);
     if (cached) return cached;
 
