@@ -31,9 +31,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [countUnavailable, setCountUnavailable] = useState(false);
   const [renderMode, setRenderMode] = useState<'loading' | 'blocked' | 'markers' | 'countUnavailable'>('loading');
   const requestIdRef = useRef(0);
-  const debugEnabled = useRef<boolean>((() => {
-    try { return new URLSearchParams(window.location.search).get('debug') === '1'; } catch { return false; }
-  })());
   const [debugInfo, setDebugInfo] = useState<{ bbox: [number, number, number, number]; preflight?: { numberReturned?: number; elapsedMs?: number; exceeds?: boolean }; full?: { total: number; pages: number; elapsedMs: number; capped: boolean } | null; running: boolean } | null>(null);
   const preflightPendingRef = useRef(false);
   const { toast } = useToast();
@@ -116,7 +113,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         const t0 = Date.now();
         const { total: t, exceedsThreshold } = await usgsService.fetchMonitoringLocationsCount(bbox, controller.signal, LIMIT);
         clearTimeout(timer);
-        if (debugEnabled.current) {
+        {
           setDebugInfo(prev => ({ ...(prev || { bbox }), bbox, preflight: { numberReturned: t ?? undefined, elapsedMs: Date.now() - t0, exceeds: exceedsThreshold }, full: prev?.full ?? null, running: false }));
         }
         if (exceedsThreshold) {
@@ -408,9 +405,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </div>
       )}
 
-      {/* Debug overlay */}
-      {debugEnabled.current && (
-        <div className="absolute top-24 left-4 z-10 pointer-events-none">
+      {/* Debug overlay (always visible for now) */}
+      <div className="absolute left-4 z-10 pointer-events-none" style={{ top: '88px' }}>
           <Card className="pointer-events-auto">
             <CardContent className="p-3 space-y-2">
               <div className="text-xs font-mono">
@@ -440,8 +436,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
               </div>
             </CardContent>
           </Card>
-        </div>
-      )}
+      </div>
 
       {/* Legend */}
       {showRiverData && (
