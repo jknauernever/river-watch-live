@@ -111,7 +111,7 @@ export class USGSService {
         if (options?.signal?.aborted) break;
         pages += 1;
         nextUrl = ensureApiKeyOnString(nextUrl);
-        const resp = await fetch(nextUrl!, { signal: options?.signal, headers: { Accept: 'application/json', ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) } });
+        const resp = await fetch(nextUrl!, { signal: options?.signal, headers: { Accept: 'application/json' } });
         if (!resp.ok) {
           // Fallback: if server rejects filter, retry without it once
           if (resp.status === 400 && filterEnabled) {
@@ -184,7 +184,7 @@ export class USGSService {
         try {
           const resp = await fetch(preflightUrl, {
             signal,
-            headers: { Accept: 'application/json', ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) },
+            headers: { Accept: 'application/json' },
           });
           if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
             const retryAfter = Number(resp.headers.get('retry-after'));
@@ -280,7 +280,7 @@ export class USGSService {
           let resp: Response | null = null;
           while (attempts < 4) {
             nextUrl = ensureApiKeyOnString(nextUrl);
-            resp = await fetch(nextUrl!, { signal: options?.signal, headers: { ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) } });
+            resp = await fetch(nextUrl!, { signal: options?.signal, headers: { Accept: 'application/json' } });
             if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
               const retryAfter = Number(resp.headers.get('retry-after'));
               const delayMs = !isNaN(retryAfter) ? retryAfter * 1000 : 500 * Math.pow(2, attempts);
@@ -518,7 +518,7 @@ export class USGSService {
       
       // Use rate limiter for individual requests
       const response = await usgsRateLimiter.executeWithRetry(async () => {
-        const resp = await fetch(url.toString(), { headers: { ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) } });
+        const resp = await fetch(url.toString());
         if (!resp.ok) {
           const error = new Error(`HTTP ${resp.status}: ${resp.statusText}`);
           (error as any).status = resp.status;
@@ -541,7 +541,7 @@ export class USGSService {
         altUrl.searchParams.set('parameter_code', '00065');
         altUrl.searchParams.set('f', 'json');
         console.log(`No features for ${siteId}; retrying with prefixed ID: ${altId}`);
-        const altResp = await fetch(altUrl.toString(), { headers: { ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) } });
+        const altResp = await fetch(altUrl.toString());
         if (altResp.ok) {
           data = await altResp.json();
           console.log(`Alt response for ${altId}:`, { totalFeatures: data.features?.length || 0 });
@@ -581,7 +581,7 @@ export class USGSService {
         url.searchParams.set('limit', '1');
         url.searchParams.set('filter-lang', 'cql-text');
         url.searchParams.set('filter', `${q.field}='${q.value}'`);
-        const resp = await fetch(url.toString(), { headers: { ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) } });
+        const resp = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
         if (!resp.ok) continue;
         const data = await resp.json();
         const feature = Array.isArray(data.features) ? data.features[0] : null;
@@ -604,7 +604,7 @@ export class USGSService {
         url.searchParams.set('monitoring_location_id', id);
         url.searchParams.set('f', 'json');
         url.searchParams.set('limit', '1000');
-        const resp = await fetch(url.toString(), { headers: { ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) } });
+        const resp = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
         if (!resp.ok) continue;
         const data = await resp.json();
         const feats = Array.isArray(data.features) ? data.features : [];
@@ -648,7 +648,7 @@ export class USGSService {
       
       // Use rate limiter for bulk requests
       const response = await usgsRateLimiter.executeWithRetry(async () => {
-        const resp = await fetch(url.toString(), { headers: { ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) } });
+        const resp = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
         if (!resp.ok) {
           const error = new Error(`HTTP ${resp.status}: ${resp.statusText}`);
           (error as any).status = resp.status;
@@ -931,7 +931,7 @@ export class USGSService {
       url.searchParams.set('limit', '1000');
       // API key ensured above
 
-      const response = await fetch(url.toString(), { headers: { ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) } });
+      const response = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
       if (!response.ok) {
         throw new Error(`USGS API error: ${response.status}`);
       }

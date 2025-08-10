@@ -1,16 +1,16 @@
 /// <reference types="google.maps" />
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { GaugeStation } from '@/types/usgs';
+
 import { usgsService } from '@/services/usgs-api';
-import { usgsRateLimiter } from '@/services/rate-limiter';
+
 import { useGoogleMaps } from '@/hooks/useGoogleMaps';
 import { MapContainer } from '@/components/MapContainer';
 import { GaugeMarkers } from '@/components/GaugeMarkers';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, RotateCcw, AlertCircle } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { Loader2, RotateCcw } from 'lucide-react';
+
 
 interface RiverGaugeMapProps {
   apiKey: string;
@@ -21,22 +21,22 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   
   const { map, isLoaded, error: mapError, resetView, loadPlacesLibrary } = useGoogleMaps({ apiKey });
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingData, setIsLoadingData] = useState(false);
+  
   const [fetchProgress, setFetchProgress] = useState<{ fetched: number; total?: number } | null>(null);
-  const [stations, setStations] = useState<GaugeStation[]>([]);
+  
   const [basicGaugeLocations, setBasicGaugeLocations] = useState<any[]>([]);
-  const [selectedStation, setSelectedStation] = useState<GaugeStation | null>(null);
-  const [showRiverData, setShowRiverData] = useState(false);
-  const [showValues, setShowValues] = useState(false);
+  
+  
+  
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
   const [countUnavailable, setCountUnavailable] = useState(false);
   const [renderMode, setRenderMode] = useState<'loading' | 'blocked' | 'markers' | 'countUnavailable'>('loading');
-  const [rateLimitStatus, setRateLimitStatus] = useState<{ isLimited: boolean; message: string; retryAfter?: number } | null>(null);
+  
   const requestIdRef = useRef(0);
   const [debugInfo, setDebugInfo] = useState<{ bbox: [number, number, number, number]; preflight?: { numberReturned?: number; elapsedMs?: number; exceeds?: boolean }; full?: { total: number; pages: number; elapsedMs: number; capped: boolean } | null; running: boolean; match?: { stations: number; matched: number } } | null>(null);
   const preflightPendingRef = useRef(false);
-  const { toast } = useToast();
+  
   const searchInitializedRef = useRef(false);
 
   const handleSearchFocus = useCallback(async () => {
@@ -90,7 +90,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     setCountUnavailable(false);
     setRenderMode('loading');
     setBasicGaugeLocations([]);
-    setStations([]);
     const myRequestId = ++requestIdRef.current;
     // Cancel any in-flight request
     (loadGaugeLocations as any).abortController?.abort?.();
@@ -203,89 +202,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   }, [map, isLoading]);
 
   // Monitor rate limiting status
-  const updateRateLimitStatus = useCallback(() => {
-    const status = usgsRateLimiter.getStatus();
-    if (status.queueLength > 0 || status.requestCount >= status.maxRequestsPerMinute * 0.8) {
-      setRateLimitStatus({
-        isLimited: true,
-        message: `API requests: ${status.requestCount}/${status.maxRequestsPerMinute} per minute`,
-        retryAfter: status.queueLength > 0 ? Math.ceil(status.queueLength * 3) : undefined
-      });
-    } else {
-      setRateLimitStatus(null);
-    }
-  }, []);
 
   // Load enhanced station data when requested
-  const loadStations = useCallback(async () => {
-    if (!showRiverData || basicGaugeLocations.length === 0 || isLoadingData || !map) return;
-    
-    // Get current map bounds for bulk API optimization
-    const bounds = map.getBounds();
-    if (!bounds) return;
-
-    const ne = bounds.getNorthEast();
-    const sw = bounds.getSouthWest();
-    const bbox: [number, number, number, number] = [
-      sw.lng(), sw.lat(), ne.lng(), ne.lat()
-    ];
-    
-    setIsLoadingData(true);
-    setRateLimitStatus(null); // Clear any previous rate limit status
-    
-    console.log('Loading water data for stations:', {
-      count: basicGaugeLocations.length,
-      bbox: bbox,
-      sampleStations: basicGaugeLocations.slice(0, 3).map(s => ({ name: s.name, siteId: s.siteId }))
-    });
-    
-    try {
-      const enhancedStations = await usgsService.enhanceGaugeStationsWithData(basicGaugeLocations, bbox);
-      console.log('Enhanced stations received:', {
-        total: enhancedStations.length,
-        withHeight: enhancedStations.filter(s => typeof s.latestHeight === 'number').length,
-        sample: enhancedStations.slice(0, 3).map(s => ({
-          name: s.name,
-          siteId: s.siteId,
-          hasHeight: typeof s.latestHeight === 'number',
-          height: s.latestHeight
-        }))
-      });
-      
-      setStations(enhancedStations);
-      updateRateLimitStatus();
-
-      toast({
-        title: "Water Data Loaded",
-        description: `Found data for ${enhancedStations.filter(s => typeof s.latestHeight === 'number').length} of ${enhancedStations.length} visible gauges`,
-      });
-    } catch (error: any) {
-      console.error('Error loading water data:', error);
-      
-      // Handle rate limiting specifically
-      if (error.status === 429 || error.message?.includes('429')) {
-        setRateLimitStatus({
-          isLimited: true,
-          message: "Rate limit exceeded. Please wait before retrying.",
-          retryAfter: 60
-        });
-        
-        toast({
-          title: "Rate Limited",
-          description: "Too many requests. Please wait a moment before trying again.",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Error Loading Water Data",
-          description: "Failed to load current water levels. Please try again.",
-          variant: "destructive",
-        });
-      }
-    } finally {
-      setIsLoadingData(false);
-    }
-  }, [showRiverData, basicGaugeLocations, isLoadingData, map, toast, updateRateLimitStatus]);
 
   // Set up map listeners once when map is loaded
   useEffect(() => {
@@ -315,34 +233,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     };
   }, [map, isLoaded, loadGaugeLocations]);
 
-  const toggleRiverData = useCallback(() => {
-    console.log('toggleRiverData called, current showRiverData:', showRiverData);
-    setShowRiverData(prev => {
-      const newValue = !prev;
-      console.log('Setting showRiverData from', prev, 'to', newValue);
-      return newValue;
-    });
-  }, [showRiverData]);
 
   // Load stations when showRiverData becomes true
-  useEffect(() => {
-    if (showRiverData && basicGaugeLocations.length > 0 && map && !isLoadingData) {
-      console.log('showRiverData changed to true, loading stations...');
-      loadStations();
-    } else if (!showRiverData) {
-      console.log('showRiverData changed to false, clearing stations...');
-      setStations([]);
-      setSelectedStation(null);
-    }
-  }, [showRiverData, basicGaugeLocations.length, map, isLoadingData, loadStations]);
 
   // Periodically update rate limit status
-  useEffect(() => {
-    if (!showRiverData) return;
-    
-    const interval = setInterval(updateRateLimitStatus, 5000); // Update every 5 seconds
-    return () => clearInterval(interval);
-  }, [showRiverData, updateRateLimitStatus]);
 
   const getUSGSApiKey = useCallback(() => {
     try {
@@ -410,41 +304,9 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </Card>
         
 
-        {rateLimitStatus && (
-          <Button 
-            onClick={() => {
-              usgsService.clearRateLimiterQueue();
-              setRateLimitStatus(null);
-              toast({
-                title: "Rate Limiter Reset",
-                description: "API request queue cleared. You can try again.",
-              });
-            }} 
-            variant="destructive" 
-            size="sm" 
-            className="pointer-events-auto"
-          >
-            Clear Queue
-          </Button>
-        )}
       </div>
 
       {/* Rate Limiting Status */}
-      {rateLimitStatus && (
-        <div className="absolute top-20 left-4 z-20 pointer-events-none">
-          <Card className="pointer-events-auto border-orange-200 bg-orange-50">
-            <CardContent className="p-3 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-orange-600" />
-              <div className="text-sm">
-                <div className="font-medium text-orange-800">{rateLimitStatus.message}</div>
-                {rateLimitStatus.retryAfter && (
-                  <div className="text-orange-600">Retry in ~{rateLimitStatus.retryAfter}s</div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
 
       {/* Demo Data Warning */}
       {isUsingDemoData && (
@@ -456,17 +318,15 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       )}
 
       {/* Loading indicator */}
-      {(isLoading || isLoadingData) && renderMode === 'loading' && (
+      {isLoading && renderMode === 'loading' && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
           <Card className="pointer-events-auto">
             <CardContent className="p-3 flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span className="text-sm">
-                {isLoading
-                  ? fetchProgress
-                    ? `Fetching gauges${fetchProgress.total ? `: ${fetchProgress.fetched} of ${fetchProgress.total}` : `: ${fetchProgress.fetched}...`}`
-                    : 'Fetching gauges...'
-                  : 'Loading water level data...'}
+                {fetchProgress
+                  ? `Fetching gauges${fetchProgress.total ? `: ${fetchProgress.fetched} of ${fetchProgress.total}` : `: ${fetchProgress.fetched}...`}`
+                  : 'Fetching gauges...'}
               </span>
             </CardContent>
           </Card>
@@ -495,93 +355,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         </div>
       )}
 
-      {/* Debug overlay (always visible for now) */}
-      <div className="absolute left-4 z-10 pointer-events-none" style={{ top: '88px' }}>
-          <Card className="pointer-events-auto">
-            <CardContent className="p-3 space-y-2">
-              <div className="text-xs font-mono">
-                <div>BBox: {JSON.stringify(debugInfo?.bbox || [])}</div>
-                <div>Preflight: {debugInfo?.preflight ? `${debugInfo.preflight.numberReturned ?? 'n/a'} in ${debugInfo.preflight.elapsedMs}ms (exceeds=${debugInfo.preflight.exceeds ? 'yes' : 'no'})` : 'n/a'}</div>
-                <div>Full Count: {debugInfo?.full ? `${debugInfo.full.total} in ${debugInfo.full.pages} pages (${debugInfo.full.elapsedMs}ms)${debugInfo.full.capped ? ' [capped]' : ''}` : debugInfo?.running ? 'running…' : '—'}</div>
-                <div>State: mode={renderMode}, markers={basicGaugeLocations.length}, stations={stations.length}</div>
-                {debugInfo?.match ? (
-                  <div className="flex items-center gap-2">
-                    <span>Heights matched: {debugInfo.match.matched} of {debugInfo.match.stations}</span>
-                    <Button size="icon" variant="ghost" onClick={() => {
-                      try {
-                        const unmatched = stations.filter(s => typeof s.latestHeight !== 'number').map(s => s.siteId || s.id);
-                        navigator.clipboard.writeText(JSON.stringify({ unmatched }, null, 2));
-                      } catch {}
-                    }}>Copy unmatched</Button>
-                  </div>
-                ) : null}
-                <div>Fetch URL: <button className="underline" onClick={() => {
-                  try {
-                    const ne = map?.getBounds?.()?.getNorthEast();
-                    const sw = map?.getBounds?.()?.getSouthWest();
-                    if (!ne || !sw) return;
-                    const round = (v: number) => Math.round(v * 1000) / 1000;
-                    const b = [round(sw.lng()), round(sw.lat()), round(ne.lng()), round(ne.lat())] as [number, number, number, number];
-                    const url = new URL('https://api.waterdata.usgs.gov/ogcapi/v0/collections/monitoring-locations/items');
-                    url.searchParams.set('bbox', b.join(','));
-                    url.searchParams.set('limit', '500');
-                    url.searchParams.set('f', 'json');
-                    url.searchParams.set('filter-lang', 'cql-text');
-                    url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
-                    const k = getUSGSApiKey();
-                    if (k) url.searchParams.set('apikey', k);
-                    window.open(url.toString(), '_blank', 'noopener');
-                  } catch {}
-                }}>open</button></div>
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={async () => {
-                  try {
-                    const bounds = map?.getBounds?.();
-                    const b = bounds ? (() => {
-                      const ne = bounds.getNorthEast();
-                      const sw = bounds.getSouthWest();
-                      const round = (v: number) => Math.round(v * 1000) / 1000;
-                      return [round(sw.lng()), round(sw.lat()), round(ne.lng()), round(ne.lat())] as [number, number, number, number];
-                    })() : (debugInfo?.bbox || [0,0,0,0] as any);
-                    setDebugInfo(prev => ({ ...(prev || { bbox: b }), bbox: b, running: true }));
-                    const controller = new AbortController();
-                    const result = await usgsService.fetchMonitoringLocationsFullCount(b, { signal: controller.signal, onProgress: () => {} });
-                    setDebugInfo(prev => ({ ...(prev || { bbox: b }), bbox: b, preflight: prev?.preflight, full: result, running: false }));
-                  } catch (e) {
-                    setDebugInfo(prev => ({ ...(prev || ({} as any)), running: false }));
-                  }
-                }}>Run full count</Button>
-                <Button size="sm" variant="ghost" onClick={() => { try { navigator.clipboard.writeText(JSON.stringify(debugInfo, null, 2)); } catch {} }}>Copy</Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    try {
-                      const bounds = map?.getBounds?.();
-                      if (!bounds) return;
-                      const ne = bounds.getNorthEast();
-                      const sw = bounds.getSouthWest();
-                      const round = (v: number) => Math.round(v * 1000) / 1000;
-                      const b = [round(sw.lng()), round(sw.lat()), round(ne.lng()), round(ne.lat())] as [number, number, number, number];
-                      const url = new URL('https://api.waterdata.usgs.gov/ogcapi/v0/collections/monitoring-locations/items');
-                      url.searchParams.set('bbox', b.join(','));
-                      url.searchParams.set('limit', '501');
-                      url.searchParams.set('f', 'json');
-                      url.searchParams.set('filter-lang', 'cql-text');
-                      url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
-                      const k = getUSGSApiKey();
-                      if (k) url.searchParams.set('apikey', k);
-                      window.open(url.toString(), '_blank', 'noopener');
-                    } catch {}
-                  }}
-                >
-                  Open preflight URL
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-      </div>
 
       {/* Legend */}
 
