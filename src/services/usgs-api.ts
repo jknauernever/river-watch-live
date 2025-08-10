@@ -907,7 +907,8 @@ export class USGSService {
   // Helpers for time series endpoints
   private normalizeIds(siteId: string): string[] {
     const numeric = siteId.replace(/^USGS[:\-]?/i, '');
-    return [siteId, `USGS-${numeric}`, `USGS:${numeric}`, numeric];
+    const variants = [`USGS-${numeric}`, `USGS:${numeric}`, numeric];
+    return Array.from(new Set(variants));
   }
   private async fetchPaged(url: string, signal?: AbortSignal): Promise<any[]> {
     let next: string | null = url;
@@ -939,11 +940,13 @@ export class USGSService {
         const series = feats
           .map((f: any) => {
             const pr = f?.properties || {};
-            const ts = pr.time || pr.datetime || pr.result_time;
-            return { t: Date.parse(ts), v: Number(pr.value) };
+            const ts = pr.time || pr.result_time || pr.datetime;
+            const val = pr.value ?? pr.result;
+            return { t: Date.parse(ts), v: Number(val) };
           })
           .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
           .sort((a, b) => a.t - b.t);
+        console.log('[USGS] obs points', series.length);
         if (series.length > 0) {
           this.setCache(cacheKey, series);
           return series;
