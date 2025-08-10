@@ -2,13 +2,14 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { GaugeStation } from '@/types/usgs';
 import { usgsService } from '@/services/usgs-api';
+import { usgsRateLimiter } from '@/services/rate-limiter';
 import { useGoogleMaps } from '@/hooks/useGoogleMaps';
 import { MapContainer } from '@/components/MapContainer';
 import { GaugeMarkers } from '@/components/GaugeMarkers';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, RotateCcw, Droplets } from 'lucide-react';
+import { Loader2, RotateCcw, Droplets, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface RiverGaugeMapProps {
@@ -31,6 +32,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
   const [countUnavailable, setCountUnavailable] = useState(false);
   const [renderMode, setRenderMode] = useState<'loading' | 'blocked' | 'markers' | 'countUnavailable'>('loading');
+  const [rateLimitStatus, setRateLimitStatus] = useState<{ isLimited: boolean; message: string; retryAfter?: number } | null>(null);
   const requestIdRef = useRef(0);
   const [debugInfo, setDebugInfo] = useState<{ bbox: [number, number, number, number]; preflight?: { numberReturned?: number; elapsedMs?: number; exceeds?: boolean }; full?: { total: number; pages: number; elapsedMs: number; capped: boolean } | null; running: boolean; match?: { stations: number; matched: number } } | null>(null);
   const preflightPendingRef = useRef(false);
@@ -221,6 +223,20 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     }
   }, [map, isLoading]);
 
+  // Monitor rate limiting status
+  const updateRateLimitStatus = useCallback(() => {
+    const status = usgsRateLimiter.getStatus();
+    if (status.queueLength > 0 || status.requestCount >= status.maxRequestsPerMinute * 0.8) {
+      setRateLimitStatus({
+        isLimited: true,
+        message: `API requests: ${status.requestCount}/${status.maxRequestsPerMinute} per minute`,
+        retryAfter: status.queueLength > 0 ? Math.ceil(status.queueLength * 3) : undefined
+      });
+    } else {
+      setRateLimitStatus(null);
+    }
+  }, []);
+
   // Load enhanced station data when requested
   const loadStations = useCallback(async () => {
     if (!showRiverData || basicGaugeLocations.length === 0 || isLoadingData || !map) return;
@@ -236,6 +252,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     ];
     
     setIsLoadingData(true);
+    setRateLimitStatus(null); // Clear any previous rate limit status
+    
     console.log('Loading water data for stations:', {
       count: basicGaugeLocations.length,
       bbox: bbox,
@@ -256,22 +274,39 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       });
       
       setStations(enhancedStations);
+      updateRateLimitStatus();
 
       toast({
         title: "Water Data Loaded",
         description: `Enhanced ${enhancedStations.length} gauges with current water levels`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading water data:', error);
-      toast({
-        title: "Error Loading Water Data",
-        description: "Failed to load current water levels. Please try again.",
-        variant: "destructive",
-      });
+      
+      // Handle rate limiting specifically
+      if (error.status === 429 || error.message?.includes('429')) {
+        setRateLimitStatus({
+          isLimited: true,
+          message: "Rate limit exceeded. Please wait before retrying.",
+          retryAfter: 60
+        });
+        
+        toast({
+          title: "Rate Limited",
+          description: "Too many requests. Please wait a moment before trying again.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Error Loading Water Data",
+          description: "Failed to load current water levels. Please try again.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsLoadingData(false);
     }
-  }, [showRiverData, basicGaugeLocations, isLoadingData, map, toast]);
+  }, [showRiverData, basicGaugeLocations, isLoadingData, map, toast, updateRateLimitStatus]);
 
   // Set up map listeners once when map is loaded
   useEffect(() => {
@@ -321,6 +356,14 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       setSelectedStation(null);
     }
   }, [showRiverData, basicGaugeLocations.length, map, isLoadingData, loadStations]);
+
+  // Periodically update rate limit status
+  useEffect(() => {
+    if (!showRiverData) return;
+    
+    const interval = setInterval(updateRateLimitStatus, 5000); // Update every 5 seconds
+    return () => clearInterval(interval);
+  }, [showRiverData, updateRateLimitStatus]);
 
   const getUSGSApiKey = useCallback(() => {
     try {
@@ -416,7 +459,42 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           <RotateCcw className="w-4 h-4 mr-2" />
           Reset
         </Button>
+
+        {rateLimitStatus && (
+          <Button 
+            onClick={() => {
+              usgsService.clearRateLimiterQueue();
+              setRateLimitStatus(null);
+              toast({
+                title: "Rate Limiter Reset",
+                description: "API request queue cleared. You can try again.",
+              });
+            }} 
+            variant="destructive" 
+            size="sm" 
+            className="pointer-events-auto"
+          >
+            Clear Queue
+          </Button>
+        )}
       </div>
+
+      {/* Rate Limiting Status */}
+      {rateLimitStatus && (
+        <div className="absolute top-20 left-4 z-20 pointer-events-none">
+          <Card className="pointer-events-auto border-orange-200 bg-orange-50">
+            <CardContent className="p-3 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-orange-600" />
+              <div className="text-sm">
+                <div className="font-medium text-orange-800">{rateLimitStatus.message}</div>
+                {rateLimitStatus.retryAfter && (
+                  <div className="text-orange-600">Retry in ~{rateLimitStatus.retryAfter}s</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Demo Data Warning */}
       {isUsingDemoData && (

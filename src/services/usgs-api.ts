@@ -1,4 +1,5 @@
 import { USGSMonitoringLocation, USGSLatestValue, GaugeStation, WaterLevel, USGSHistoricalData } from '@/types/usgs';
+import { usgsRateLimiter } from './rate-limiter';
 
 const USGS_BASE_URL = 'https://api.waterdata.usgs.gov/ogcapi/v0';
 const ENV_USGS_API_KEY: string = (import.meta as any)?.env?.VITE_USGS_API_KEY ?? '';
@@ -46,6 +47,15 @@ export class USGSService {
   private cache = new Map<string, any>();
   private cacheTimeout = 5 * 60 * 1000; // 5 minutes
   private requestQueue = new Map<string, Promise<any>>();
+
+  /**
+   * Clear rate limiter queue and reset state
+   */
+  clearRateLimiterQueue() {
+    usgsRateLimiter.clearQueue();
+    this.requestQueue.clear();
+    this.cache.clear();
+  }
 
   private getCached<T>(key: string): T | null {
     const cached = this.cache.get(key);
@@ -501,12 +511,18 @@ export class USGSService {
       url.searchParams.set('f', 'json');
 
       console.log(`Making individual API call to: ${url.toString()}`);
-      const response = await fetch(url.toString());
-      if (!response.ok) {
-        console.warn(`No data available for site ${siteId}: ${response.status}`);
-        return null;
-      }
-
+      
+      // Use rate limiter for individual requests
+      const response = await usgsRateLimiter.executeWithRetry(async () => {
+        const resp = await fetch(url.toString());
+        if (!resp.ok) {
+          const error = new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+          (error as any).status = resp.status;
+          throw error;
+        }
+        return resp;
+      });
+      
       const data = await response.json();
       console.log(`Individual API response for ${siteId}:`, {
         totalFeatures: data.features?.length || 0,
@@ -551,12 +567,17 @@ export class USGSService {
       // API key ensured above
 
       console.log('Making bulk gauge data request to:', url.toString());
-      const response = await fetch(url.toString());
       
-      if (!response.ok) {
-        console.warn(`Bulk gauge data request failed: ${response.status}`);
-        return new Map();
-      }
+      // Use rate limiter for bulk requests
+      const response = await usgsRateLimiter.executeWithRetry(async () => {
+        const resp = await fetch(url.toString());
+        if (!resp.ok) {
+          const error = new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+          (error as any).status = resp.status;
+          throw error;
+        }
+        return resp;
+      });
 
       const data = await response.json();
       console.log('Bulk gauge data response:', {
