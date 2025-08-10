@@ -273,7 +273,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           (loadGaugeLocations as any).abortController = null;
         }
       }
-  }, [map, isLoading]);
+   }, [map, isLoading, selectedDataset, updateDatasetAvailability]);
 
   // Monitor rate limiting status
 
