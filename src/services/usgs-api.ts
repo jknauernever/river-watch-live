@@ -658,8 +658,9 @@ export class USGSService {
 
       console.log('Making bulk gauge data request to:', url.toString());
       
-      // Use rate limiter for bulk requests
-      const response = await usgsRateLimiter.executeWithRetry(async () => {
+      // Use rate limiter for large requests; bypass for tiny pre-checks (limit <= 1)
+      const useLimiter = (options?.limit ?? 1000) > 1;
+      const fetchOnce = async () => {
         const resp = await fetch(url.toString(), { headers: { Accept: 'application/json' }, signal: options?.signal });
         if (!resp.ok) {
           const error = new Error(`HTTP ${resp.status}: ${resp.statusText}`);
@@ -667,7 +668,10 @@ export class USGSService {
           throw error;
         }
         return resp;
-      });
+      };
+      const response = useLimiter
+        ? await usgsRateLimiter.executeWithRetry(fetchOnce)
+        : await fetchOnce();
 
       const data = await response.json();
       console.log('Bulk gauge data response:', {
@@ -723,7 +727,7 @@ export class USGSService {
         if (first) addWithAliases(String(first), feature);
       });
       
-      console.log(`Bulk fetch returned gauge data for ${gaugeDataMap.size} locations`);
+      console.log(`Bulk fetch built ${gaugeDataMap.size} keyed entries (includes ID aliases)`);
       this.setCache(cacheKey, gaugeDataMap);
       return gaugeDataMap;
     } catch (error) {

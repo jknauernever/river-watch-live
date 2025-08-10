@@ -195,8 +195,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         setCountUnavailable(false);
         setFetchProgress({ fetched: 0, total: undefined });
 
-        // Update dataset availability in the background
-        updateDatasetAvailability(bbox);
+        // Update dataset availability in the background (debounced)
+        updateDatasetAvailabilityDebounced(bbox, abortController.signal);
 
         const codes = DATASETS[selectedDataset];
         const bulkMap = await usgsService.fetchBulkGaugeData(bbox, {
