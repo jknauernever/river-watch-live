@@ -10,6 +10,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Loader2, RotateCcw } from 'lucide-react';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 
 
 interface RiverGaugeMapProps {
@@ -55,6 +58,37 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   
   const searchInitializedRef = useRef(false);
 
+  type DatasetKey =
+    | 'Gage height' | 'Discharge' | 'Water temperature' | 'pH'
+    | 'Dissolved oxygen' | 'NO3+NO2 (as N)' | 'Turbidity'
+    | 'Susp. sediment conc' | 'Specific conductance';
+
+  const DATASETS: Record<DatasetKey, string[]> = {
+    'Gage height': ['00065'],
+    'Discharge': ['00060'],
+    'Water temperature': ['00010'],
+    'pH': ['00400'],
+    'Dissolved oxygen': ['00300'],
+    'NO3+NO2 (as N)': ['99133'],
+    'Turbidity': ['63680'],
+    'Susp. sediment conc': ['80154'],
+    'Specific conductance': ['00095'],
+  };
+  const DEFAULT_DATASET: DatasetKey = 'Gage height';
+
+  const [selectedDataset, setSelectedDataset] = useState<DatasetKey>(DEFAULT_DATASET);
+  const [datasetAvailability, setDatasetAvailability] = useState<Record<DatasetKey, boolean>>({
+    'Gage height': true,
+    'Discharge': true,
+    'Water temperature': true,
+    'pH': true,
+    'Dissolved oxygen': true,
+    'NO3+NO2 (as N)': true,
+    'Turbidity': true,
+    'Susp. sediment conc': true,
+    'Specific conductance': true,
+  });
+
   const handleSearchFocus = useCallback(async () => {
     if (searchInitializedRef.current) return;
     try {
@@ -75,6 +109,31 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       console.warn('Deferred search initialization failed:', err);
     }
   }, [loadPlacesLibrary, map]);
+
+  // Check availability of each dataset within the bbox
+  const updateDatasetAvailability = useCallback(async (bbox: [number, number, number, number]) => {
+    try {
+      const entries = Object.entries(DATASETS) as [DatasetKey, string[]][];
+      const results = await Promise.all(entries.map(async ([name, codes]) => {
+        try {
+          const m = await usgsService.fetchBulkGaugeData(bbox, { parameterCodes: codes, limit: 1 });
+          return [name, m.size > 0] as const;
+        } catch {
+          return [name, false] as const;
+        }
+      }));
+      const next: Record<DatasetKey, boolean> = { ...datasetAvailability } as any;
+      results.forEach(([name, ok]) => { next[name] = ok; });
+      setDatasetAvailability(next);
+      // Auto-switch if current becomes unavailable
+      if (!next[selectedDataset]) {
+        const firstEnabled = (Object.keys(DATASETS) as DatasetKey[]).find(k => next[k]);
+        if (firstEnabled && firstEnabled !== selectedDataset) setSelectedDataset(firstEnabled);
+      }
+    } catch (e) {
+      console.warn('updateDatasetAvailability failed', e);
+    }
+  }, [datasetAvailability, selectedDataset]);
 
   // Load gauge locations (progressive, abortable) when map bounds change
   const loadGaugeLocations = useCallback(async () => {
@@ -119,7 +178,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         setCountUnavailable(false);
         setFetchProgress({ fetched: 0, total: undefined });
 
-        const codes = activeCodes.length ? activeCodes : ['00060','00065'];
+        // Update dataset availability in the background
+        updateDatasetAvailability(bbox);
+
+        const codes = DATASETS[selectedDataset];
         const bulkMap = await usgsService.fetchBulkGaugeData(bbox, {
           parameterCodes: codes,
           limit: 10000,
@@ -245,11 +307,16 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     };
   }, [map, isLoaded, loadGaugeLocations]);
 
-  // Re-fetch when active parameter toggles change
+  // Sync active codes to selected dataset
+  useEffect(() => {
+    setActiveCodes(DATASETS[selectedDataset]);
+  }, [selectedDataset]);
+
+  // Re-fetch on dataset change
   useEffect(() => {
     if (!map || !isLoaded) return;
     loadGaugeLocations();
-  }, [activeCodes, map, isLoaded, loadGaugeLocations]);
+  }, [selectedDataset, map, isLoaded, loadGaugeLocations]);
 
   // Periodically update rate limit status
 
@@ -296,85 +363,119 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       {/* Map Container */}
       <MapContainer />
       
-      {/* Markers Component */}
-      {basicGaugeLocations.length > 0 && (
-        <GaugeMarkers 
-          map={map}
-          basicLocations={basicGaugeLocations}
-          activeCodes={activeCodes}
-          thresholds={thresholds}
-        />
-      )}
-
-      {/* Header */}
-      <div className="absolute top-4 left-4 right-4 z-10 flex flex-col gap-3 pointer-events-none">
-        <div className="flex gap-3 items-center">
-          <Card className="flex-1 max-w-md pointer-events-auto">
-            <CardContent className="p-3">
-              <input
-                id="search-input"
-                type="text"
-                placeholder="Search for a location..."
-                onFocus={handleSearchFocus}
-                className="w-full border-0 outline-none bg-transparent text-foreground placeholder:text-muted-foreground"
-              />
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Parameter toggles */}
-        <Card className="max-w-3xl pointer-events-auto">
+      {/* Header: search + mobile dataset trigger */}
+      <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
+        <Card className="flex-1 max-w-md pointer-events-auto">
           <CardContent className="p-3">
-            <div className="flex flex-wrap gap-2">
-              {Object.keys(PARAM_LABEL).map((code) => {
-                const active = activeCodes.includes(code);
-                const available = availableCodes.has(code);
-                return (
-                  <Button
-                    key={code}
-                    size="sm"
-                    variant={active ? 'secondary' : 'outline'}
-                    disabled={!available && !active}
-                    onClick={() => {
-                      setActiveCodes((prev) => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
-                    }}
-                  >
-                    {code} · {PARAM_LABEL[code] || code}
-                  </Button>
-                );
-              })}
-            </div>
+            <input
+              id="search-input"
+              type="text"
+              placeholder="Search for a location..."
+              onFocus={handleSearchFocus}
+              className="w-full border-0 outline-none bg-transparent text-foreground placeholder:text-muted-foreground"
+            />
           </CardContent>
         </Card>
 
-        {/* Legend */}
-        <Card className="max-w-3xl pointer-events-auto">
-          <CardContent className="p-3">
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap gap-2 text-sm">
-                {activeCodes.map((c) => (
-                  <Badge key={c} variant="secondary">{c} · {PARAM_LABEL[c] || c}</Badge>
-                ))}
-              </div>
-              <div className="space-y-1">
-                <div className="h-2 rounded" style={{ background: 'linear-gradient(to right, #d4f0ff, #4a90e2, #08306b)' }} />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Low</span>
-                  <span>Med</span>
-                  <span>High</span>
+        {/* Mobile: Dataset drawer trigger */}
+        <div className="ml-3 md:hidden pointer-events-auto">
+          <Sheet>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="sm">Dataset</Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-80 p-0">
+              <div className="p-4 space-y-4">
+                <div>
+                  <div className="text-sm font-semibold mb-2">Dataset</div>
+                  <RadioGroup value={selectedDataset} onValueChange={(v) => setSelectedDataset(v as any)}>
+                    {(Object.keys(DATASETS) as DatasetKey[]).map((name) => {
+                      const code = DATASETS[name][0];
+                      const id = `ds-mobile-${code}`;
+                      const disabled = datasetAvailability[name] === false;
+                      return (
+                        <div key={name} className="flex items-center gap-2 py-1">
+                          <RadioGroupItem id={id} value={name} disabled={disabled} />
+                          <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>
+                            {name} <span className="ml-1 text-xs text-muted-foreground">· {code}</span>
+                          </Label>
+                        </div>
+                      );
+                    })}
+                  </RadioGroup>
                 </div>
-                {activeCodes.length === 1 && thresholds[activeCodes[0]] && (
-                  <div className="text-xs text-muted-foreground">
-                    {(() => {
-                      const code = activeCodes[0];
-                      const t = thresholds[code]!;
-                      const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
-                      const fmt = (n: number) => Number.isFinite(n) ? n.toLocaleString() : '—';
-                      return `${fmt(t.min)} | ${fmt(t.q33)} | ${fmt(t.q66)} | ${fmt(t.max)}${unit}`;
-                    })()}
-                  </div>
-                )}
+
+                {/* Legend (compact) */}
+                <div>
+                  <div className="text-sm font-semibold mb-2">Legend</div>
+                  <div className="text-sm mb-1">{PARAM_LABEL[DATASETS[selectedDataset][0]] || selectedDataset}</div>
+                  <div className="h-2 rounded" style={{ background: 'linear-gradient(to right, #d4f0ff, #4a90e2, #08306b)' }} />
+                  {(() => {
+                    const code = DATASETS[selectedDataset][0];
+                    const t = thresholds[code];
+                    const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
+                    const fmt = (n: number) => Number.isFinite(n) ? n.toLocaleString() : '—';
+                    return t ? (
+                      <div className="mt-1 text-xs text-muted-foreground">{`${fmt(t.min)} | ${fmt(t.q33)} | ${fmt(t.q66)} | ${fmt(t.max)}${unit}`}</div>
+                    ) : null;
+                  })()}
+                </div>
+
+                {/* Status */}
+                <div aria-live="polite" className="text-xs text-muted-foreground">
+                  {basicGaugeLocations.length > 0
+                    ? `${basicGaugeLocations.length} gauges in view`
+                    : `No gauges with latest ${selectedDataset} in view.`}
+                </div>
               </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+      </div>
+
+      {/* Desktop left sidebar */}
+      <div className="hidden md:block absolute top-24 left-4 z-10 w-80 pointer-events-none">
+        <Card className="pointer-events-auto">
+          <CardContent className="p-4 space-y-4">
+            <div>
+              <div className="text-sm font-semibold mb-2">Dataset</div>
+              <RadioGroup value={selectedDataset} onValueChange={(v) => setSelectedDataset(v as any)}>
+                {(Object.keys(DATASETS) as DatasetKey[]).map((name) => {
+                  const code = DATASETS[name][0];
+                  const id = `ds-${code}`;
+                  const disabled = datasetAvailability[name] === false;
+                  return (
+                    <div key={name} className="flex items-center gap-2 py-1">
+                      <RadioGroupItem id={id} value={name} disabled={disabled} />
+                      <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>
+                        {name} <span className="ml-1 text-xs text-muted-foreground">· {code}</span>
+                      </Label>
+                    </div>
+                  );
+                })}
+              </RadioGroup>
+            </div>
+
+            {/* Legend (compact) */}
+            <div>
+              <div className="text-sm font-semibold mb-2">Legend</div>
+              <div className="text-sm mb-1">{PARAM_LABEL[DATASETS[selectedDataset][0]] || selectedDataset}</div>
+              <div className="h-2 rounded" style={{ background: 'linear-gradient(to right, #d4f0ff, #4a90e2, #08306b)' }} />
+              {(() => {
+                const code = DATASETS[selectedDataset][0];
+                const t = thresholds[code];
+                const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
+                const fmt = (n: number) => Number.isFinite(n) ? n.toLocaleString() : '—';
+                return t ? (
+                  <div className="mt-1 text-xs text-muted-foreground">{`${fmt(t.min)} | ${fmt(t.q33)} | ${fmt(t.q66)} | ${fmt(t.max)}${unit}`}</div>
+                ) : null;
+              })()}
+            </div>
+
+            {/* Status */}
+            <div aria-live="polite" className="text-xs text-muted-foreground">
+              {basicGaugeLocations.length > 0
+                ? `${basicGaugeLocations.length} gauges in view`
+                : `No gauges with latest ${selectedDataset} in view.`}
             </div>
           </CardContent>
         </Card>
@@ -430,16 +531,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       )}
 
 
-      {/* Legend */}
-
-      {/* Gauge count - always show when locations are loaded */}
-      {renderMode === 'markers' && basicGaugeLocations.length > 0 && (
-        <div className="absolute bottom-4 right-4 z-10 pointer-events-none">
-          <Badge variant="secondary">
-            {basicGaugeLocations.length} gauge{basicGaugeLocations.length !== 1 ? 's' : ''} in view
-          </Badge>
-        </div>
-      )}
     </div>
   );
 };
