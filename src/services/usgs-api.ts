@@ -567,6 +567,65 @@ export class USGSService {
     }
   }
 
+  // Fetch full site attributes from monitoring locations
+  async fetchSiteDetails(siteId: string): Promise<Record<string, any> | null> {
+    try {
+      const numeric = siteId.replace(/^USGS[:\-]?/i, '');
+      const tryQueries = [
+        { field: 'monitoring_location_number', value: numeric },
+        { field: 'monitoring_location_id', value: `USGS-${numeric}` },
+      ];
+      for (const q of tryQueries) {
+        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`));
+        url.searchParams.set('f', 'json');
+        url.searchParams.set('limit', '1');
+        url.searchParams.set('filter-lang', 'cql-text');
+        url.searchParams.set('filter', `${q.field}='${q.value}'`);
+        const resp = await fetch(url.toString(), { headers: { ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) } });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        const feature = Array.isArray(data.features) ? data.features[0] : null;
+        if (feature?.properties) return feature.properties;
+      }
+      return null;
+    } catch (e) {
+      console.warn('fetchSiteDetails failed for', siteId, e);
+      return null;
+    }
+  }
+
+  // Fetch all latest measurements for a site (all parameter codes)
+  async fetchLatestAllParameters(siteId: string): Promise<any[]> {
+    try {
+      const numeric = siteId.replace(/^USGS[:\-]?/i, '');
+      const idsToTry = [siteId, `USGS-${numeric}`, `USGS:${numeric}`, numeric];
+      for (const id of idsToTry) {
+        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous/items`));
+        url.searchParams.set('monitoring_location_id', id);
+        url.searchParams.set('f', 'json');
+        url.searchParams.set('limit', '1000');
+        const resp = await fetch(url.toString(), { headers: { ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) } });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        const feats = Array.isArray(data.features) ? data.features : [];
+        if (feats.length > 0) return feats;
+      }
+      return [];
+    } catch (e) {
+      console.warn('fetchLatestAllParameters failed for', siteId, e);
+      return [];
+    }
+  }
+
+  // Convenience: fetch attributes and latest measurements together
+  async getGaugeFullInfo(siteId: string): Promise<{ attributes: Record<string, any> | null; latest: any[] }>{
+    const [attributes, latest] = await Promise.all([
+      this.fetchSiteDetails(siteId),
+      this.fetchLatestAllParameters(siteId),
+    ]);
+    return { attributes, latest };
+  }
+
   // NEW: Efficient bulk fetch of gauge data for multiple sites in a bbox
   async fetchBulkGaugeData(bbox: [number, number, number, number]): Promise<Map<string, USGSLatestValue>> {
     const cacheKey = `bulk-gauge-${bbox.join(',')}`;

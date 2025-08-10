@@ -9,7 +9,7 @@ import { GaugeMarkers } from '@/components/GaugeMarkers';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, RotateCcw, Droplets, AlertCircle } from 'lucide-react';
+import { Loader2, RotateCcw, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface RiverGaugeMapProps {
@@ -191,27 +191,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       setIsUsingDemoData(false);
       console.log(`Loaded ${validLocations.length} gauge locations, isDemo: ${validLocations.length > 0 && validLocations[0].isDemo}`);
 
-      // Auto-enhance: fetch latest heights to color markers
-      try {
-        setIsLoadingData(true);
-        const mapBounds = map.getBounds();
-        if (mapBounds) {
-          const ne2 = mapBounds.getNorthEast();
-          const sw2 = mapBounds.getSouthWest();
-          const bbox2: [number, number, number, number] = [sw2.lng(), sw2.lat(), ne2.lng(), ne2.lat()];
-          const enhancedStations = await usgsService.enhanceGaugeStationsWithData(validLocations, bbox2);
-          setStations(enhancedStations);
-          // Update debug with match stats
-          setDebugInfo(prev => {
-            const matched = enhancedStations.filter(s => typeof s.latestHeight === 'number').length;
-            return { ...(prev || { bbox: bbox2, running: false }), match: { stations: enhancedStations.length, matched } };
-          });
-        }
-      } catch (enhanceErr) {
-        console.warn('Auto-enhance water data failed:', enhanceErr);
-      } finally {
-        setIsLoadingData(false);
-      }
     } catch (error) {
       console.error('Error loading gauge locations:', error);
     } finally {
@@ -413,10 +392,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         <GaugeMarkers 
           map={map}
           basicLocations={basicGaugeLocations}
-          stations={stations}
-          showRiverData={showRiverData}
-          showValues={showValues}
-          onStationSelect={setSelectedStation}
         />
       )}
 
@@ -434,31 +409,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           </CardContent>
         </Card>
         
-        <Button 
-          onClick={toggleRiverData} 
-          variant={showRiverData ? "default" : "outline"} 
-          size="sm"
-          disabled={basicGaugeLocations.length === 0}
-          className="pointer-events-auto"
-        >
-          <Droplets className="w-4 h-4 mr-2" />
-          {showRiverData ? "Hide" : "Show"} Water Data
-        </Button>
-
-        <Button 
-          onClick={() => setShowValues(v => !v)}
-          variant={showValues ? "default" : "outline"}
-          size="sm"
-          disabled={!showRiverData}
-          className="pointer-events-auto"
-        >
-          {showValues ? 'Hide' : 'Show'} Values
-        </Button>
-        
-        <Button onClick={resetView} variant="secondary" size="sm" className="pointer-events-auto">
-          <RotateCcw className="w-4 h-4 mr-2" />
-          Reset
-        </Button>
 
         {rateLimitStatus && (
           <Button 
@@ -634,41 +584,12 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
       </div>
 
       {/* Legend */}
-      {showRiverData && (
-        <Card className="absolute bottom-4 left-4 z-10">
-          <CardContent className="p-3">
-            <div className="flex items-center gap-1 mb-2">
-              <Droplets className="w-4 h-4 text-primary" />
-              <span className="text-sm font-medium">Water Levels</span>
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full bg-water-low"></div>
-                <span>Low (&lt; 2 ft)</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full bg-water-medium"></div>
-                <span>Medium (2-5 ft)</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full bg-water-high"></div>
-                <span>High (5-10 ft)</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full bg-water-critical"></div>
-                <span>Critical (&gt; 10 ft)</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Gauge count - always show when locations are loaded */}
       {renderMode === 'markers' && basicGaugeLocations.length > 0 && (
         <div className="absolute bottom-4 right-4 z-10 pointer-events-none">
           <Badge variant="secondary">
             {basicGaugeLocations.length} gauge{basicGaugeLocations.length !== 1 ? 's' : ''} in view
-            {showRiverData && stations.length > 0 && ` • ${stations.length} with data`}
           </Badge>
         </div>
       )}

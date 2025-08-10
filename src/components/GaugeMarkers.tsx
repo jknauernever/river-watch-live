@@ -1,8 +1,6 @@
 /// <reference types="google.maps" />
 import { useEffect, useRef, useCallback } from 'react';
-import { GaugeStation } from '@/types/usgs';
-// Clustering disabled per product decision; retain import commented for possible future use
-// import { MarkerClusterer } from '@googlemaps/markerclusterer';
+import { usgsService } from '@/services/usgs-api';
 
 interface BasicLocation {
   siteId: string;
@@ -14,316 +12,149 @@ interface BasicLocation {
 interface GaugeMarkersProps {
   map: google.maps.Map | null;
   basicLocations: BasicLocation[];
-  stations: GaugeStation[];
-  showRiverData: boolean;
-  showValues?: boolean;
-  onStationSelect?: (station: GaugeStation | null) => void;
 }
 
-export const GaugeMarkers = ({ 
-  map, 
-  basicLocations, 
-  stations, 
-  showRiverData, 
-  showValues,
-  onStationSelect 
-}: GaugeMarkersProps) => {
-  const markersRef = useRef<(google.maps.Marker | any)[]>([]);
+export const GaugeMarkers = ({ map, basicLocations }: GaugeMarkersProps) => {
+  const markersRef = useRef<google.maps.Marker[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
-  const markerMapRef = useRef<Map<string, google.maps.Marker | any>>(new Map());
-  // const clustererRef = useRef<MarkerClusterer | null>(null);
+  const markerMapRef = useRef<Map<string, google.maps.Marker>>(new Map());
 
   const clearMarkers = useCallback(() => {
-    console.log('Clearing markers:', markersRef.current.length);
-    markersRef.current.forEach(marker => (marker as any).setMap(null));
+    markersRef.current.forEach(marker => marker.setMap(null));
     markersRef.current = [];
-    if (infoWindowRef.current) {
-      infoWindowRef.current.close();
-    }
     markerMapRef.current.clear();
-    // if (clustererRef.current) {
-    //   clustererRef.current.clearMarkers();
-    // }
+    infoWindowRef.current?.close();
   }, []);
 
-  const createBasicMarker = useCallback((location: BasicLocation) => {
-    if (!map || !window.google) {
-      console.warn('Map or Google Maps not available for marker creation');
-      return null;
-    }
+  const buildAttributesHtml = (attrs: Record<string, any>) => {
+    const rows = Object.entries(attrs)
+      .sort(([a],[b]) => a.localeCompare(b))
+      .map(([key, val]) => {
+        const value = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        return `<div class="flex justify-between gap-3"><span class="font-medium">${key}</span><span class="text-right">${value}</span></div>`;
+      })
+      .join('');
+    return rows || '<div class="text-muted-foreground">No attributes available.</div>';
+  };
 
+  const buildMeasurementsHtml = (features: any[]) => {
+    if (!Array.isArray(features) || features.length === 0) {
+      return '<div class="text-muted-foreground">No recent measurements.</div>';
+    }
+    const rows = features
+      .map((f: any) => {
+        const p = f?.properties || {};
+        const label = p.parameter_name || p.observed_property_name || p.parameter_code || 'Measurement';
+        const unit = p.unit || p.unit_of_measurement || '';
+        const time = p.time || p.datetime || p.result_time || '';
+        const val = p.value ?? p.result ?? 'N/A';
+        return `<div class="space-y-0.5">
+          <div class="font-medium">${label}</div>
+          <div class="text-sm">Value: <span class="font-mono">${val}</span>${unit ? ` ${unit}` : ''}</div>
+          ${time ? `<div class="text-xs text-muted-foreground">${new Date(time).toLocaleString()}</div>` : ''}
+        </div>`;
+      })
+      .join('<hr class="my-2" />');
+    return rows;
+  };
+
+  const createMarker = useCallback((location: BasicLocation) => {
+    if (!map || !window.google) return null;
     const { google } = window;
-    
-    // Ensure coordinates are in the correct format [lng, lat]
     const [lng, lat] = location.coordinates;
-    
-    // Validate coordinates
-    if (typeof lng !== 'number' || typeof lat !== 'number' || 
-        isNaN(lng) || isNaN(lat) || 
-        lng < -180 || lng > 180 || lat < -90 || lat > 90) {
-      console.warn('Invalid coordinates for location:', location.name, location.coordinates);
-      return null;
-    }
+    if (
+      typeof lng !== 'number' || typeof lat !== 'number' ||
+      isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90
+    ) return null;
 
-    console.log('Creating basic marker for:', location.name, 'at', [lng, lat]);
-    
     const marker = new google.maps.Marker({
       position: { lat, lng },
-      map: map,
+      map,
       title: location.name,
       icon: {
         path: google.maps.SymbolPath.CIRCLE,
         scale: 8,
         fillColor: '#1e90ff',
-        fillOpacity: 0.8,
+        fillOpacity: 0.9,
         strokeColor: '#ffffff',
         strokeWeight: 2,
       },
-      // Ensure marker is visible
-      visible: true,
       zIndex: 1,
-      // Add animation to make markers more visible
-      animation: google.maps.Animation.DROP
+      animation: google.maps.Animation.DROP,
     });
 
-    marker.addListener('click', () => {
-      const content = `
-        <div class="p-3 max-w-sm">
-          <h3 class="font-semibold text-primary mb-2">${location.name}</h3>
-          <div class="space-y-1 text-sm">
-            <div><strong>Site ID:</strong> ${location.siteId}</div>
-            <div><strong>Type:</strong> ${location.siteType === 'ST' ? 'Stream' : location.siteType === 'LK' ? 'Lake' : 'Estuary'}</div>
-            <div><strong>Coordinates:</strong> ${lat.toFixed(4)}, ${lng.toFixed(4)}</div>
-            <div class="text-muted-foreground text-xs mt-2">Click "Show Water Data" to see current water levels</div>
-          </div>
-        </div>
-      `;
-
-      if (infoWindowRef.current) {
-        infoWindowRef.current.close();
-      }
-
+    marker.addListener('click', async () => {
+      // Open a lightweight InfoWindow immediately
+      infoWindowRef.current?.close();
       infoWindowRef.current = new google.maps.InfoWindow({
-        content: content,
+        content: `<div class="p-3 max-w-sm"><div class="font-semibold mb-1">${location.name}</div><div class="text-sm">Loading data…</div></div>`
       });
-
       infoWindowRef.current.open(map, marker);
+
+      try {
+        const { attributes, latest } = await usgsService.getGaugeFullInfo(location.siteId);
+        const attrsHtml = buildAttributesHtml(attributes || {});
+        const measurementsHtml = buildMeasurementsHtml(latest || []);
+        const content = `
+          <div class="p-3 max-w-sm">
+            <h3 class="font-semibold text-primary mb-2">${location.name}</h3>
+            <div class="text-xs text-muted-foreground mb-2">${lat.toFixed(4)}, ${lng.toFixed(4)} • ${location.siteId}</div>
+            <div class="space-y-3">
+              <div>
+                <div class="text-sm mb-1 font-semibold">Site attributes</div>
+                <div class="space-y-1">${attrsHtml}</div>
+              </div>
+              <div>
+                <div class="text-sm mb-1 font-semibold">Latest measurements</div>
+                <div class="space-y-2">${measurementsHtml}</div>
+              </div>
+            </div>
+          </div>`;
+        infoWindowRef.current.setContent(content);
+      } catch (e) {
+        infoWindowRef.current.setContent(`<div class="p-3 max-w-sm"><div class="font-semibold mb-1">${location.name}</div><div class="text-sm text-destructive">Failed to load data.</div></div>`);
+      }
     });
 
     return marker;
   }, [map]);
 
-  const createStationMarker = useCallback((station: GaugeStation) => {
-    if (!map || !window.google) {
-      console.warn('Map or Google Maps not available for station marker creation');
-      return null;
-    }
-
-    const { google } = window;
-    
-    // Ensure coordinates are in the correct format [lng, lat]
-    const [lng, lat] = station.coordinates;
-    
-    // Validate coordinates
-    if (typeof lng !== 'number' || typeof lat !== 'number' || 
-        isNaN(lng) || isNaN(lat) || 
-        lng < -180 || lng > 180 || lat < -90 || lat > 90) {
-      console.warn('Invalid coordinates for station:', station.name, station.coordinates);
-      return null;
-    }
-
-    console.log('Creating station marker for:', station.name, 'at', [lng, lat]);
-    
-    const marker = new google.maps.Marker({
-      position: { lat, lng },
-      map: map,
-      title: station.name,
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 8,
-        fillColor: station.waterLevel.color,
-        fillOpacity: 0.8,
-        strokeColor: '#ffffff',
-        strokeWeight: 2,
-      },
-      label: (showValues && typeof station.latestHeight === 'number') ? {
-        text: station.latestHeight.toFixed(1),
-        color: '#111827',
-        fontWeight: '700',
-        fontSize: '12px',
-      } as any : undefined,
-      // Ensure marker is visible
-      visible: true,
-      zIndex: 2
-    });
-
-    marker.addListener('click', () => {
-      onStationSelect?.(station);
-      
-      const content = `
-        <div class="p-3 max-w-sm">
-          <h3 class="font-semibold text-primary mb-2">${station.name}</h3>
-          <div class="space-y-1 text-sm">
-            <div><strong>Site ID:</strong> ${station.siteId}</div>
-            <div><strong>Coordinates:</strong> ${lat.toFixed(4)}, ${lng.toFixed(4)}</div>
-            <div><strong>Gage Height:</strong> ${station.latestHeight?.toFixed(2) || 'N/A'} ft</div>
-            <div><strong>Water Level:</strong> 
-              <span style="color: ${station.waterLevel.color}; font-weight: bold; text-transform: capitalize;">
-                ${station.waterLevel.level}
-              </span>
-            </div>
-            ${station.lastUpdated ? `<div><strong>Last Updated:</strong> ${new Date(station.lastUpdated).toLocaleString()}</div>` : ''}
-          </div>
-        </div>
-      `;
-
-      if (infoWindowRef.current) {
-        infoWindowRef.current.close();
-      }
-
-      infoWindowRef.current = new google.maps.InfoWindow({
-        content: content,
-      });
-
-      infoWindowRef.current.open(map, marker);
-    });
-
-    return marker;
-  }, [map, onStationSelect, showValues]);
-
-  // Update markers when data changes using diffing and batching
+  // Sync markers with locations
   useEffect(() => {
-    if (!map) {
-      console.log('Map not available, skipping marker update');
-      return;
-    }
+    if (!map) return;
 
-    console.log('Updating markers:', {
-      showRiverData,
-      basicLocationsCount: basicLocations.length,
-      stationsCount: stations.length,
-      showValues,
-      sampleStations: stations.slice(0, 3).map(s => ({
-        name: s.name,
-        siteId: s.siteId,
-        hasHeight: typeof s.latestHeight === 'number',
-        height: s.latestHeight
-      }))
-    });
+    const nextIds = new Set(basicLocations.map(l => l.siteId));
 
-    const upsert = (id: string, lat: number, lng: number, title: string, color?: string) => {
-      const existing = markerMapRef.current.get(id) as google.maps.Marker | undefined;
-      if (existing) {
-        if (existing.setPosition) existing.setPosition({ lat, lng });
-        if (existing.setIcon) {
-          existing.setIcon({
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 8,
-            fillColor: color || '#1e90ff',
-            fillOpacity: 0.8,
-            strokeColor: '#ffffff',
-            strokeWeight: 2,
-          } as any);
-        }
-        // Update label for values
-        if (showRiverData) {
-          const station = stations.find(s => s.siteId === id || s.id === id);
-          const labelText = (showValues && station && typeof station.latestHeight === 'number') ? station.latestHeight.toFixed(1) : undefined;
-          if ((existing as any).setLabel) (existing as any).setLabel(labelText as any);
-        }
-        return existing;
-      }
-
-      // Create using the original styled circular symbol and attach listeners
-      let marker: google.maps.Marker | null = null;
-       if (showRiverData) {
-        const station = stations.find(s => s.siteId === id || s.id === id);
-        if (station) {
-          console.log(`Creating station marker for ${station.name} (${station.siteId}) with height: ${station.latestHeight}`);
-          marker = createStationMarker(station) as google.maps.Marker | null;
-        } else {
-          console.log(`No station data found for ID: ${id}`);
-        }
-      } else {
-        const loc = basicLocations.find(l => l.siteId === id);
-        if (loc) {
-          marker = createBasicMarker(loc) as google.maps.Marker | null;
-        }
-      }
-
-      if (!marker) {
-        console.log(`Creating fallback marker for ID: ${id}`);
-        marker = new google.maps.Marker({
-          position: { lat, lng },
-          map,
-          title,
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 8,
-            fillColor: color || '#1e90ff',
-            fillOpacity: 0.8,
-            strokeColor: '#ffffff',
-            strokeWeight: 2,
-          },
-          visible: true,
-          zIndex: showRiverData ? 2 : 1,
-          animation: google.maps.Animation.DROP,
-        });
-      }
-
-      markerMapRef.current.set(id, marker);
-      return marker;
-    };
-
-    const targets: Array<{ id: string; lat: number; lng: number; title: string; color?: string }> = showRiverData
-      ? stations.map(s => ({ id: s.siteId || s.id, lat: s.coordinates[1], lng: s.coordinates[0], title: s.name, color: (typeof s.latestHeight === 'number') ? s.waterLevel.color : '#1e90ff' }))
-      : basicLocations.map(l => ({ id: l.siteId, lat: l.coordinates[1], lng: l.coordinates[0], title: l.name }));
-
-    console.log('Target markers to create:', {
-      count: targets.length,
-      showRiverData,
-      sample: targets.slice(0, 3).map(t => ({
-        id: t.id,
-        title: t.title,
-        color: t.color
-      }))
-    });
-
-    const nextIds = new Set(targets.map(t => t.id));
-
-    // Remove markers that are no longer needed
+    // Remove markers not in view
     markerMapRef.current.forEach((marker, id) => {
       if (!nextIds.has(id)) {
-        (marker as any).setMap(null);
+        marker.setMap(null);
         markerMapRef.current.delete(id);
       }
     });
 
-    // Clustering disabled; markers are placed directly on the map
-
-    // Batch additions/updates
-    const batchSize = 200;
-    let index = 0;
-    const process = () => {
-      const end = Math.min(index + batchSize, targets.length);
-      for (; index < end; index++) {
-        const t = targets[index];
-        const m = upsert(t.id, t.lat, t.lng, t.title, t.color);
-        if ((m as any).setMap) {
-          (m as any).setMap(map);
+    // Upsert
+    basicLocations.forEach((loc) => {
+      let marker = markerMapRef.current.get(loc.siteId);
+      const [lng, lat] = loc.coordinates;
+      if (marker) {
+        marker.setPosition({ lat, lng });
+      } else {
+        marker = createMarker(loc) as google.maps.Marker | null;
+        if (marker) {
+          marker.setMap(map);
+          markerMapRef.current.set(loc.siteId, marker);
         }
       }
-      if (index < targets.length) requestAnimationFrame(process);
+    });
+
+    return () => {
+      // no-op here; full cleanup on unmount
     };
-    process();
-  }, [map, basicLocations, stations, showRiverData, showValues, createBasicMarker, createStationMarker, clearMarkers]);
+  }, [map, basicLocations, createMarker]);
 
   // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      clearMarkers();
-    };
-  }, [clearMarkers]);
+  useEffect(() => clearMarkers, [clearMarkers]);
 
-  return null; // This component only manages markers, doesn't render UI
+  return null;
 };
