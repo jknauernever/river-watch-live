@@ -527,11 +527,26 @@ export class USGSService {
         return resp;
       });
       
-      const data = await response.json();
+      let data = await response.json();
       console.log(`Individual API response for ${siteId}:`, {
         totalFeatures: data.features?.length || 0,
         features: data.features
       });
+      
+      // If no features returned, try prefixed form (USGS-<id>) once
+      if ((!data.features || data.features.length === 0) && !/^USGS[:\-]/i.test(siteId)) {
+        const altId = `USGS-${siteId.replace(/^USGS[:\-]?/i, '')}`;
+        const altUrl = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous/items`));
+        altUrl.searchParams.set('monitoring_location_id', altId);
+        altUrl.searchParams.set('parameter_code', '00065');
+        altUrl.searchParams.set('f', 'json');
+        console.log(`No features for ${siteId}; retrying with prefixed ID: ${altId}`);
+        const altResp = await fetch(altUrl.toString(), { headers: { ...(getUSGSApiKey() ? { 'X-Api-Key': getUSGSApiKey() } : {}) } });
+        if (altResp.ok) {
+          data = await altResp.json();
+          console.log(`Alt response for ${altId}:`, { totalFeatures: data.features?.length || 0 });
+        }
+      }
       
       // Find gage height data (parameter code 00065)
       const gageHeightData = data.features?.find((feature: any) => 

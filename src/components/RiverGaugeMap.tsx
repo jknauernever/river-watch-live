@@ -278,7 +278,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
       toast({
         title: "Water Data Loaded",
-        description: `Enhanced ${enhancedStations.length} gauges with current water levels`,
+        description: `Found data for ${enhancedStations.filter(s => typeof s.latestHeight === 'number').length} of ${enhancedStations.length} visible gauges`,
       });
     } catch (error: any) {
       console.error('Error loading water data:', error);
