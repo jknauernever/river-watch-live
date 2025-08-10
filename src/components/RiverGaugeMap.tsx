@@ -362,6 +362,16 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     <div className="relative w-full h-screen bg-background">
       {/* Map Container */}
       <MapContainer />
+
+      {/* Markers */}
+      {basicGaugeLocations.length > 0 && (
+        <GaugeMarkers
+          map={map}
+          basicLocations={basicGaugeLocations}
+          activeCodes={activeCodes}
+          thresholds={thresholds}
+        />
+      )}
       
       {/* Header: search + mobile dataset trigger */}
       <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
