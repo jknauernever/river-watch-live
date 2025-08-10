@@ -509,7 +509,7 @@ export class USGSService {
     console.log(`Fetching latest value for site: ${siteId}`);
     
     try {
-      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`));
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous/items`));
       url.searchParams.set('monitoring_location_id', siteId);
       url.searchParams.set('parameter_code', '00065');
       url.searchParams.set('f', 'json');
@@ -561,7 +561,7 @@ export class USGSService {
     console.log('Fetching bulk gauge data for bbox:', bbox);
     
     try {
-      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`));
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous/items`));
       
       // Get all gauge height data in the bbox in one request
       url.searchParams.set('bbox', bbox.join(','));
