@@ -62,7 +62,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
   // Load gauge locations (progressive, abortable) when map bounds change
   const loadGaugeLocations = useCallback(async () => {
-    if (!map || isLoading) return;
+    if (!map) return;
 
     const bounds = map.getBounds();
     if (!bounds) {
