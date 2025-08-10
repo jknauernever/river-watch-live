@@ -934,7 +934,7 @@ export class USGSService {
     for (const id of ids) {
       try {
         const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' });
-        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/observations/items?${p.toString()}`));
+        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/instantaneous-values/items?${p.toString()}`));
         console.log('[USGS] obs fetch', { id, code, start: start.toISOString(), end: end.toISOString() });
         const feats = await this.fetchPaged(url.toString(), signal);
         const series = feats
