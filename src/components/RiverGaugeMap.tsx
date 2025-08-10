@@ -40,6 +40,8 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [thresholds, setThresholds] = useState<Record<string, { q33:number; q66:number; min:number; max:number }>>({});
   const [availableCodes, setAvailableCodes] = useState<Set<string>>(new Set());
   const [unitsByCode, setUnitsByCode] = useState<Record<string, string | undefined>>({});
+  const availabilityTimerRef = useRef<number | null>(null);
+  const availabilityCacheRef = useRef<Map<string, { timestamp: number; result: Record<DatasetKey, boolean> }>>(new Map());
   
   const requestIdRef = useRef(0);
   const [debugInfo, setDebugInfo] = useState<{ bbox: [number, number, number, number]; preflight?: { numberReturned?: number; elapsedMs?: number; exceeds?: boolean }; full?: { total: number; pages: number; elapsedMs: number; capped: boolean } | null; running: boolean; match?: { stations: number; matched: number } } | null>(null);
@@ -99,30 +101,56 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     }
   }, [loadPlacesLibrary, map]);
 
-  // Check availability of each dataset within the bbox
-  const updateDatasetAvailability = useCallback(async (bbox: [number, number, number, number]) => {
+  // Check availability of each dataset within the bbox (debounced + cached)
+  const updateDatasetAvailability = useCallback(async (bbox: [number, number, number, number], signal?: AbortSignal) => {
     try {
+      const key = bbox.join(',');
+      const ttl = 30_000; // 30s
+      const cached = availabilityCacheRef.current.get(key);
+      if (cached && Date.now() - cached.timestamp < ttl) {
+        setDatasetAvailability(prev => ({ ...prev, ...cached.result }));
+        if (!cached.result[selectedDataset]) {
+          const firstEnabled = (Object.keys(DATASETS) as DatasetKey[]).find(k => cached.result[k]);
+          if (firstEnabled && firstEnabled !== selectedDataset) setSelectedDataset(firstEnabled);
+        }
+        return;
+      }
+
       const entries = Object.entries(DATASETS) as [DatasetKey, string[]][];
       const results = await Promise.all(entries.map(async ([name, codes]) => {
+        if (signal?.aborted) return [name, false] as const;
         try {
-          const m = await usgsService.fetchBulkGaugeData(bbox, { parameterCodes: codes, limit: 1 });
+          const m = await usgsService.fetchBulkGaugeData(bbox, { parameterCodes: codes, limit: 1, signal });
           return [name, m.size > 0] as const;
         } catch {
           return [name, false] as const;
         }
       }));
-      const next: Record<DatasetKey, boolean> = { ...datasetAvailability } as any;
-      results.forEach(([name, ok]) => { next[name] = ok; });
-      setDatasetAvailability(next);
-      // Auto-switch if current becomes unavailable
-      if (!next[selectedDataset]) {
-        const firstEnabled = (Object.keys(DATASETS) as DatasetKey[]).find(k => next[k]);
+
+      if (signal?.aborted) return;
+      const resultObj: Record<DatasetKey, boolean> = {} as any;
+      results.forEach(([name, ok]) => { (resultObj as any)[name] = ok; });
+
+      availabilityCacheRef.current.set(key, { timestamp: Date.now(), result: resultObj });
+      setDatasetAvailability(prev => ({ ...prev, ...resultObj }));
+      if (!resultObj[selectedDataset]) {
+        const firstEnabled = (Object.keys(DATASETS) as DatasetKey[]).find(k => resultObj[k]);
         if (firstEnabled && firstEnabled !== selectedDataset) setSelectedDataset(firstEnabled);
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
       console.warn('updateDatasetAvailability failed', e);
     }
-  }, [datasetAvailability, selectedDataset]);
+  }, [selectedDataset]);
+
+  const updateDatasetAvailabilityDebounced = useCallback((bbox: [number, number, number, number], signal?: AbortSignal) => {
+    if (availabilityTimerRef.current) {
+      clearTimeout(availabilityTimerRef.current as any);
+    }
+    availabilityTimerRef.current = window.setTimeout(() => {
+      updateDatasetAvailability(bbox, signal);
+    }, 800);
+  }, [updateDatasetAvailability]);
 
   // Load gauge locations (progressive, abortable) when map bounds change
   const loadGaugeLocations = useCallback(async () => {
