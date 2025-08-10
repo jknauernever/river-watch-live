@@ -629,7 +629,7 @@ export class USGSService {
   // NEW: Efficient bulk fetch of gauge data for multiple sites in a bbox
   async fetchBulkGaugeData(
     bbox: [number, number, number, number],
-    options?: { parameterCodes?: string[]; limit?: number }
+    options?: { parameterCodes?: string[]; limit?: number; signal?: AbortSignal }
   ): Promise<Map<string, USGSLatestValue>> {
     const codes = options?.parameterCodes && options.parameterCodes.length > 0 ? options.parameterCodes : ['00065'];
     const limit = options?.limit ?? 1000;
@@ -660,7 +660,7 @@ export class USGSService {
       
       // Use rate limiter for bulk requests
       const response = await usgsRateLimiter.executeWithRetry(async () => {
-        const resp = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+        const resp = await fetch(url.toString(), { headers: { Accept: 'application/json' }, signal: options?.signal });
         if (!resp.ok) {
           const error = new Error(`HTTP ${resp.status}: ${resp.statusText}`);
           (error as any).status = resp.status;
@@ -727,6 +727,10 @@ export class USGSService {
       this.setCache(cacheKey, gaugeDataMap);
       return gaugeDataMap;
     } catch (error) {
+      if ((error as any)?.name === 'AbortError') {
+        console.warn('Bulk gauge data request aborted');
+        return new Map();
+      }
       console.error('Error fetching bulk gauge data:', error);
       return new Map();
     }

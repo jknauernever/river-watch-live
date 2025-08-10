@@ -174,6 +174,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         const bulkMap = await usgsService.fetchBulkGaugeData(bbox, {
           parameterCodes: codes,
           limit: 10000,
+          signal: abortController.signal,
         });
 
         type Site = {
