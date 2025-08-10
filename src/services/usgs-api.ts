@@ -934,18 +934,37 @@ export class USGSService {
     for (const id of ids) {
       try {
         const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' });
-        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/instantaneous-values/items?${p.toString()}`));
+        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/observations/items?${p.toString()}`));
         console.log('[USGS] obs fetch', { id, code, start: start.toISOString(), end: end.toISOString() });
         const feats = await this.fetchPaged(url.toString(), signal);
-        const series = feats
+        let series = feats
           .map((f: any) => {
             const pr = f?.properties || {};
             const ts = pr.time || pr.result_time || pr.datetime;
             const val = pr.value ?? pr.result;
-            return { t: Date.parse(ts), v: Number(val) };
+            const codeProp = pr.parameter_code || pr.observed_property_code;
+            return codeProp === code ? { t: Date.parse(ts), v: Number(val) } : { t: NaN, v: NaN };
           })
           .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
           .sort((a, b) => a.t - b.t);
+        if (series.length === 0) {
+          // Fallback: fetch without parameter filter and filter client-side
+          const p2 = new URLSearchParams({ f: 'json', monitoring_location_id: id, startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' });
+          const url2 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/observations/items?${p2.toString()}`));
+          console.log('[USGS] obs fallback (no param_code)', { id });
+          const feats2 = await this.fetchPaged(url2.toString(), signal);
+          series = feats2
+            .map((f: any) => {
+              const pr = f?.properties || {};
+              const ts = pr.time || pr.result_time || pr.datetime;
+              const val = pr.value ?? pr.result;
+              const codeProp = pr.parameter_code || pr.observed_property_code;
+              return codeProp === code ? { t: Date.parse(ts), v: Number(val) } : { t: NaN, v: NaN };
+            })
+            .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
+            .sort((a, b) => a.t - b.t);
+          console.log('[USGS] obs fallback points', series.length);
+        }
         console.log('[USGS] obs points', series.length);
         if (series.length > 0) {
           this.setCache(cacheKey, series);
