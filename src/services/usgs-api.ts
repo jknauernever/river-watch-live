@@ -934,9 +934,14 @@ export class USGSService {
       try {
         const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' });
         const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/observations/items?${p.toString()}`));
+        console.log('[USGS] obs fetch', { id, code, start: start.toISOString(), end: end.toISOString() });
         const feats = await this.fetchPaged(url.toString(), signal);
         const series = feats
-          .map((f: any) => ({ t: Date.parse(f?.properties?.time), v: Number(f?.properties?.value) }))
+          .map((f: any) => {
+            const pr = f?.properties || {};
+            const ts = pr.time || pr.datetime || pr.result_time;
+            return { t: Date.parse(ts), v: Number(pr.value) };
+          })
           .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
           .sort((a, b) => a.t - b.t);
         if (series.length > 0) {
@@ -960,9 +965,14 @@ export class USGSService {
       try {
         const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' });
         const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily/items?${p.toString()}`));
+        console.log('[USGS] daily fetch', { id, code, start: start.toISOString(), end: end.toISOString() });
         const feats = await this.fetchPaged(url.toString(), signal);
         const series = feats
-          .map((f: any) => ({ t: Date.parse(f?.properties?.time), v: Number(f?.properties?.value) }))
+          .map((f: any) => {
+            const pr = f?.properties || {};
+            const ts = pr.time || pr.datetime || pr.result_time;
+            return { t: Date.parse(ts), v: Number(pr.value) };
+          })
           .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
           .sort((a, b) => a.t - b.t);
         if (series.length > 0) {
