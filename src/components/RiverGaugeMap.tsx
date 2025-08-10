@@ -302,19 +302,25 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   }, [map, isLoaded, loadGaugeLocations]);
 
   const toggleRiverData = useCallback(() => {
+    console.log('toggleRiverData called, current showRiverData:', showRiverData);
     setShowRiverData(prev => {
       const newValue = !prev;
-      
-      if (newValue) {
-        loadStations();
-      } else {
-        setStations([]);
-        setSelectedStation(null);
-      }
-      
+      console.log('Setting showRiverData from', prev, 'to', newValue);
       return newValue;
     });
-  }, [loadStations]);
+  }, [showRiverData]);
+
+  // Load stations when showRiverData becomes true
+  useEffect(() => {
+    if (showRiverData && basicGaugeLocations.length > 0 && map && !isLoadingData) {
+      console.log('showRiverData changed to true, loading stations...');
+      loadStations();
+    } else if (!showRiverData) {
+      console.log('showRiverData changed to false, clearing stations...');
+      setStations([]);
+      setSelectedStation(null);
+    }
+  }, [showRiverData, basicGaugeLocations.length, map, isLoadingData, loadStations]);
 
   const getUSGSApiKey = useCallback(() => {
     try {
