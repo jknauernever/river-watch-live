@@ -80,8 +80,22 @@ export const GaugeMarkers = ({ map, basicLocations }: GaugeMarkersProps) => {
         strokeWeight: 2,
       },
       zIndex: 1,
-      animation: google.maps.Animation.DROP,
+      opacity: 0,
     });
+
+    // Fade-in animation (replaces DROP)
+    try {
+      const duration = 300; // ms
+      const start = performance.now();
+      const step = (now: number) => {
+        const t = Math.min(1, (now - start) / duration);
+        marker.setOpacity(t);
+        if (t < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    } catch (_) {
+      // noop if opacity not supported
+    }
 
     marker.addListener('click', async () => {
       // Open a lightweight InfoWindow immediately
