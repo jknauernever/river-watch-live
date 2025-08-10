@@ -1,6 +1,7 @@
 /// <reference types="google.maps" />
 import { useEffect, useRef, useCallback } from 'react';
 import { usgsService } from '@/services/usgs-api';
+import { colorForValue, PARAM_LABEL } from '@/lib/datasets';
 
 interface BasicLocation {
   siteId: string;
@@ -29,39 +30,14 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
     infoWindowRef.current?.close();
   }, []);
 
-  const PARAM_LABEL: Record<string, string> = {
-    '00060': 'Discharge',
-    '00065': 'Gage height',
-    '00010': 'Water temp',
-    '00400': 'pH',
-    '00300': 'Dissolved oxygen',
-    '99133': 'NO₃+NO₂ (as N)',
-    '63680': 'Turbidity',
-    '80154': 'Susp. sediment conc',
-    '00095': 'Specific conductance',
-  };
+  // Use selected dataset code (first active code)
+  const activeCode = activeCodes[0] || '00065';
 
-  const COLOR_LOW = '#d4f0ff';
-  const COLOR_MED = '#4a90e2';
-  const COLOR_HIGH = '#08306b';
-
-  const binRank = (code: string, value: number) => {
-    const t = thresholds?.[code];
-    if (!t || !Number.isFinite(value)) return 1; // treat as medium
-    if (value <= t.q33) return 0;
-    if (value >= t.q66) return 2;
-    return 1;
-  };
-
-  const markerColorForSite = (site: BasicLocation) => {
-    if (!site.params || site.params.length === 0) return COLOR_MED;
-    let maxRank = -1;
-    for (const p of site.params) {
-      if (!activeCodes.includes(p.code)) continue;
-      const r = binRank(p.code, Number(p.value));
-      if (r > maxRank) maxRank = r;
-    }
-    return [COLOR_LOW, COLOR_MED, COLOR_HIGH][Math.max(0, maxRank)];
+  const siteColor = (site: BasicLocation) => {
+    const p = site.params?.find(x => x.code === activeCode);
+    const t = thresholds?.[activeCode];
+    const value = Number(p?.value);
+    return colorForValue(activeCode, value, (t as any) || null);
   };
 
   const buildAttributesHtml = (attrs: Record<string, any>) => {
@@ -87,11 +63,15 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
         const unit = p.unit || p.unit_of_measurement || p.unit_of_measure || '';
         const time = p.time || p.datetime || p.result_time || '';
         const val = Number(p.value ?? p.result);
-        const rank = Number.isFinite(val) ? binRank(String(code), val) : 1;
-        const tag = rank === 0 ? 'Low' : rank === 2 ? 'High' : 'Med';
+        // Tag only for active dataset code
+        let tag = '';
+        const t = thresholds?.[activeCode];
+        if (code === activeCode && t && Number.isFinite(val)) {
+          tag = val <= t.q33 ? 'Low' : val >= t.q66 ? 'High' : 'Med';
+        }
         return `<div class="space-y-0.5">
           <div class="font-medium">${label} (${code})</div>
-          <div class="text-sm">Value: <span class="font-mono">${Number.isFinite(val) ? val : 'N/A'}</span>${unit ? ` ${unit}` : ''} — <span class="font-semibold">${tag}</span></div>
+          <div class="text-sm">Value: <span class="font-mono">${Number.isFinite(val) ? val : 'N/A'}</span>${unit ? ` ${unit}` : ''}${tag ? ` — <span class=\"font-semibold\">${tag}</span>` : ''}</div>
           ${time ? `<div class="text-xs text-muted-foreground">${new Date(time).toLocaleString()}</div>` : ''}
         </div>`;
       })
@@ -108,7 +88,7 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
       isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90
     ) return null;
 
-    const color = markerColorForSite(location);
+    const color = siteColor(location);
     const marker = new google.maps.Marker({
       position: { lat, lng },
       map,
@@ -193,10 +173,9 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
     basicLocations.forEach((loc) => {
       let marker = markerMapRef.current.get(loc.siteId);
       const [lng, lat] = loc.coordinates;
-      const color = markerColorForSite(loc);
+      const color = siteColor(loc);
       if (marker) {
         marker.setPosition({ lat, lng });
-        const icon = marker.getIcon() as google.maps.Symbol | undefined;
         const nextIcon: google.maps.Symbol = {
           path: window.google.maps.SymbolPath.CIRCLE,
           scale: 8,

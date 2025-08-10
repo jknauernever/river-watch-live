@@ -13,6 +13,7 @@ import { Loader2, RotateCcw } from 'lucide-react';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { DATASETS, DatasetKey, PARAM_LABEL, COLOR_BY_CODE, computeThresholds, legendTicks } from '@/lib/datasets';
 
 
 interface RiverGaugeMapProps {
@@ -43,18 +44,6 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const requestIdRef = useRef(0);
   const [debugInfo, setDebugInfo] = useState<{ bbox: [number, number, number, number]; preflight?: { numberReturned?: number; elapsedMs?: number; exceeds?: boolean }; full?: { total: number; pages: number; elapsedMs: number; capped: boolean } | null; running: boolean; match?: { stations: number; matched: number } } | null>(null);
   const preflightPendingRef = useRef(false);
-  
-  const PARAM_LABEL: Record<string, string> = {
-    '00060': 'Discharge',
-    '00065': 'Gage height',
-    '00010': 'Water temp',
-    '00400': 'pH',
-    '00300': 'Dissolved oxygen',
-    '99133': 'NO₃+NO₂ (as N)',
-    '63680': 'Turbidity',
-    '80154': 'Susp. sediment conc',
-    '00095': 'Specific conductance',
-  };
   
   const searchInitializedRef = useRef(false);
 
@@ -237,25 +226,18 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           }
         }
 
-        // Build thresholds from values per parameter (q33/q66)
-        const quantile = (sorted: number[], q: number) => {
-          if (!sorted.length) return NaN;
-          const pos = (sorted.length - 1) * q;
-          const base = Math.floor(pos);
-          const rest = pos - base;
-          return sorted[base] + (rest ? (sorted[base + 1] - sorted[base]) * rest : 0);
-        };
-        const valuesByCode: Record<string, number[]> = {};
+        // Build thresholds for the single active code
+        const code = codes[0];
+        const values: number[] = [];
         for (const site of featuresBySite.values()) {
-          for (const p of site.params) {
-            (valuesByCode[p.code] ||= []).push(p.value);
-          }
+          const p = site.params.find(x => x.code === code);
+          if (p && Number.isFinite(p.value)) values.push(p.value);
         }
-        const th: Record<string, { q33:number; q66:number; min:number; max:number }> = {};
-        Object.entries(valuesByCode).forEach(([code, arr]) => {
-          arr.sort((a,b)=>a-b);
-          th[code] = { q33: quantile(arr, 0.33), q66: quantile(arr, 0.66), min: arr[0], max: arr[arr.length-1] };
-        });
+        const t = computeThresholds(values);
+        const th: Record<string, { q33:number; q66:number; min:number; max:number }> = t
+          ? { [code]: { q33: t.q33, q66: t.q66, min: t.min, max: t.max } }
+          : {};
+
 
         const sites = Array.from(featuresBySite.values());
         setBasicGaugeLocations(sites);
@@ -420,13 +402,19 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
                   <div className="text-sm mb-1">{PARAM_LABEL[DATASETS[selectedDataset][0]] || selectedDataset}</div>
                   <div className="h-2 rounded" style={{ background: 'linear-gradient(to right, #d4f0ff, #4a90e2, #08306b)' }} />
                   {(() => {
-                    const code = DATASETS[selectedDataset][0];
-                    const t = thresholds[code];
-                    const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
-                    const fmt = (n: number) => Number.isFinite(n) ? n.toLocaleString() : '—';
-                    return t ? (
-                      <div className="mt-1 text-xs text-muted-foreground">{`${fmt(t.min)} | ${fmt(t.q33)} | ${fmt(t.q66)} | ${fmt(t.max)}${unit}`}</div>
-                    ) : null;
+                  const code = DATASETS[selectedDataset][0];
+                  const t = thresholds[code];
+                  const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
+                  const colors = COLOR_BY_CODE[code]?.colors || { low:'#d4f0ff', med:'#4a90e2', high:'#08306b' };
+                  const gradient = `linear-gradient(to right, ${colors.low}, ${colors.med}, ${colors.high})`;
+                  return (
+                    <>
+                      <div className="h-2 rounded" style={{ background: gradient }} />
+                      {t ? (
+                        <div className="mt-1 text-xs text-muted-foreground">{legendTicks({ min:t.min, q33:t.q33, q66:t.q66, max:t.max }, unit)}</div>
+                      ) : null}
+                    </>
+                  );
                   })()}
                 </div>
 
@@ -469,14 +457,18 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
             <div>
               <div className="text-sm font-semibold mb-2">Legend</div>
               <div className="text-sm mb-1">{PARAM_LABEL[DATASETS[selectedDataset][0]] || selectedDataset}</div>
-              <div className="h-2 rounded" style={{ background: 'linear-gradient(to right, #d4f0ff, #4a90e2, #08306b)' }} />
+              {(() => {
+                const code = DATASETS[selectedDataset][0];
+                const colors = COLOR_BY_CODE[code]?.colors || { low:'#d4f0ff', med:'#4a90e2', high:'#08306b' };
+                const gradient = `linear-gradient(to right, ${colors.low}, ${colors.med}, ${colors.high})`;
+                return <div className="h-2 rounded" style={{ background: gradient }} />
+              })()}
               {(() => {
                 const code = DATASETS[selectedDataset][0];
                 const t = thresholds[code];
                 const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
-                const fmt = (n: number) => Number.isFinite(n) ? n.toLocaleString() : '—';
                 return t ? (
-                  <div className="mt-1 text-xs text-muted-foreground">{`${fmt(t.min)} | ${fmt(t.q33)} | ${fmt(t.q66)} | ${fmt(t.max)}${unit}`}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{legendTicks({ min:t.min, q33:t.q33, q66:t.q66, max:t.max }, unit)}</div>
                 ) : null;
               })()}
             </div>
