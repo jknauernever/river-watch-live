@@ -2,16 +2,18 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { COLOR_BY_CODE, PARAM_LABEL, legendTicks, Thresholds } from '@/lib/datasets';
 import { usgsService } from '@/services/usgs-api';
 import { aggregateMonthly, downsampleEven, formatTimestamp, formatValueWithUnit, gradientCssForCode, pickUnit, TV } from '@/lib/popup-utils';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 interface SitePopupProps {
   site: { siteId: string; name: string; coordinates: [number, number]; siteType?: string };
+  attributes: Record<string, any> | null;
   latestFeatures: any[];
   activeCode: string;
   thresholds: Thresholds | null;
   onCenter?: () => void;
 }
 
-export const SitePopup: React.FC<SitePopupProps> = ({ site, latestFeatures, activeCode, thresholds, onCenter }) => {
+export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFeatures, activeCode, thresholds, onCenter }) => {
   const [mode, setMode] = useState<'14d'|'year'>('14d');
   const [series, setSeries] = useState<TV[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -44,6 +46,19 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, latestFeatures, acti
     return pickUnit(activeCode, r?.unit);
   }, [rows, activeCode]);
 
+  const facts = useMemo(() => {
+    const a = attributes || {} as any;
+    const countyState = [a.county_name, a.state_name].filter(Boolean).join(', ');
+    const items: Array<{ label: string; value: string }> = [];
+    if (a.altitude != null && a.altitude !== '') items.push({ label: 'Elevation', value: `${a.altitude} ft` });
+    if (a.drainage_area != null && a.drainage_area !== '') items.push({ label: 'Drainage area', value: `${a.drainage_area} mi²` });
+    const huc = a.hydrologic_unit_code || a.hydrologic_unit || a.hydrologic_unit_name;
+    if (huc) items.push({ label: 'HUC', value: String(huc) });
+    if (countyState) items.push({ label: 'County/State', value: countyState });
+    if (a.time_zone_abbreviation) items.push({ label: 'Time zone', value: a.time_zone_abbreviation });
+    return items;
+  }, [attributes]);
+
   useEffect(() => {
     abortRef.current?.abort();
     const ac = new AbortController();
@@ -60,7 +75,14 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, latestFeatures, acti
         } else {
           const daily = await usgsService.fetchDailyMeansSeries(site.siteId, activeCode, start, now, ac.signal);
           if (ac.signal.aborted) return;
-          setSeries(aggregateMonthly(daily));
+          let months = aggregateMonthly(daily);
+          if ((!months || months.length === 0)) {
+            // Fallback: use observations and aggregate monthly
+            const obs = await usgsService.fetchObservationsSeries(site.siteId, activeCode, start, now, ac.signal);
+            if (ac.signal.aborted) return;
+            months = aggregateMonthly(obs);
+          }
+          setSeries(months);
         }
       } catch (e: any) {
         if (ac.signal.aborted) return;
@@ -136,6 +158,21 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, latestFeatures, acti
         })}
       </div>
 
+      {/* Quick facts */}
+      {facts.length > 0 && (
+        <div className="mt-3">
+          <div className="text-xs font-medium mb-1">Quick facts</div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            {facts.map((f, i) => (
+              <div key={i} className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground truncate">{f.label}</span>
+                <span className="font-medium truncate">{f.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Legend */}
       <div className="mt-3">
         <div className="text-xs font-medium mb-1">Legend</div>
@@ -148,11 +185,33 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, latestFeatures, acti
         <a
           className="text-xs px-2 py-1 rounded border hover:bg-accent"
           href={`https://waterdata.usgs.gov/monitoring-location/${site.siteId.replace(/^USGS[:\-]?/i,'')}`}
-          target="_blank" rel="noreferrer"
+          target="_blank" rel="noreferrer" aria-label="View on USGS"
         >View on USGS</a>
-        <button className="text-xs px-2 py-1 rounded border hover:bg-accent" onClick={onCenter}>Center here</button>
-        <button className="text-xs px-2 py-1 rounded border hover:bg-accent" onClick={() => navigator.clipboard.writeText(site.siteId)}>Copy ID</button>
+        <button className="text-xs px-2 py-1 rounded border hover:bg-accent" onClick={onCenter} aria-label="Center map here">Center here</button>
+        <button className="text-xs px-2 py-1 rounded border hover:bg-accent" onClick={() => navigator.clipboard.writeText(site.siteId)} aria-label="Copy site ID">Copy ID</button>
       </div>
+
+      {/* More details (raw attributes) */}
+      {attributes && (
+        <Collapsible>
+          <CollapsibleTrigger className="mt-2 text-xs underline underline-offset-2">More details</CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="mt-2 max-h-40 overflow-auto pr-1">
+              <div className="space-y-1 text-xs">
+                {Object.entries(attributes)
+                  .filter(([_, v]) => v !== null && v !== '' && typeof v !== 'object')
+                  .slice(0, 200)
+                  .map(([k, v]) => (
+                    <div key={k} className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground truncate">{k}</span>
+                      <span className="font-mono truncate">{String(v)}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       {/* Mini chart */}
       <div className="mt-3">

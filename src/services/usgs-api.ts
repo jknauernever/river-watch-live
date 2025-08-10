@@ -49,7 +49,7 @@ function calculateWaterLevel(value: number): WaterLevel {
 
 export class USGSService {
   private cache = new Map<string, any>();
-  private cacheTimeout = 5 * 60 * 1000; // 5 minutes
+  private cacheTimeout = 60 * 1000; // 60 seconds for time-series and fetch caches
   private requestQueue = new Map<string, Promise<any>>();
 
   /**

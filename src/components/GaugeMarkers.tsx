@@ -107,6 +107,7 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
         root.render(
           React.createElement(SitePopup, {
             site: { siteId: location.siteId, name: location.name, coordinates: location.coordinates, siteType: location.siteType },
+            attributes: attributes || null,
             latestFeatures: latest || [],
             activeCode,
             thresholds: (thresholds?.[activeCode] as any) || null,
@@ -117,7 +118,7 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
           })
         );
       } catch (e) {
-        container.innerHTML = `<div class="p-3 max-w-sm"><div class="font-semibold mb-1">${location.name}</div><div class="text-sm text-destructive">Failed to load data.</div></div>`;
+        container.innerHTML = `<div class=\"p-3 max-w-sm\"><div class=\"font-semibold mb-1\">${location.name}</div><div class=\"text-sm text-destructive\">Failed to load data.</div></div>`;
       }
     });
 
