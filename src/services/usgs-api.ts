@@ -933,8 +933,8 @@ export class USGSService {
     const ids = this.normalizeIds(siteId);
     for (const id of ids) {
       try {
-        const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' });
-        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/observations/items?${p.toString()}`));
+        const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, start: start.toISOString(), end: end.toISOString(), limit: '20000' });
+        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/instantaneous-values/items?${p.toString()}`));
         console.log('[USGS] obs fetch', { id, code, start: start.toISOString(), end: end.toISOString() });
         const feats = await this.fetchPaged(url.toString(), signal);
         let series = feats
@@ -949,8 +949,8 @@ export class USGSService {
           .sort((a, b) => a.t - b.t);
         if (series.length === 0) {
           // Fallback: fetch without parameter filter and filter client-side
-          const p2 = new URLSearchParams({ f: 'json', monitoring_location_id: id, startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' });
-          const url2 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/observations/items?${p2.toString()}`));
+          const p2 = new URLSearchParams({ f: 'json', monitoring_location_id: id, start: start.toISOString(), end: end.toISOString(), limit: '20000' });
+          const url2 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/instantaneous-values/items?${p2.toString()}`));
           console.log('[USGS] obs fallback (no param_code)', { id });
           const feats2 = await this.fetchPaged(url2.toString(), signal);
           series = feats2
@@ -985,8 +985,8 @@ export class USGSService {
     const ids = this.normalizeIds(siteId);
     for (const id of ids) {
       try {
-        const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' });
-        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily/items?${p.toString()}`));
+         const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', start: start.toISOString(), end: end.toISOString(), limit: '20000' });
+         const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items?${p.toString()}`));
         console.log('[USGS] daily fetch', { id, code, start: start.toISOString(), end: end.toISOString() });
         const feats = await this.fetchPaged(url.toString(), signal);
         const series = feats
