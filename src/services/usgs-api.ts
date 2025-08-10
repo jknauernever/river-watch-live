@@ -627,22 +627,34 @@ export class USGSService {
   }
 
   // NEW: Efficient bulk fetch of gauge data for multiple sites in a bbox
-  async fetchBulkGaugeData(bbox: [number, number, number, number]): Promise<Map<string, USGSLatestValue>> {
-    const cacheKey = `bulk-gauge-${bbox.join(',')}`;
+  async fetchBulkGaugeData(
+    bbox: [number, number, number, number],
+    options?: { parameterCodes?: string[]; limit?: number }
+  ): Promise<Map<string, USGSLatestValue>> {
+    const codes = options?.parameterCodes && options.parameterCodes.length > 0 ? options.parameterCodes : ['00065'];
+    const limit = options?.limit ?? 1000;
+    const cacheKey = `bulk-gauge-${bbox.join(',')}-${codes.join('+')}-${limit}`;
     const cached = this.getCached<Map<string, USGSLatestValue>>(cacheKey);
     if (cached) return cached;
 
-    console.log('Fetching bulk gauge data for bbox:', bbox);
+    console.log('Fetching bulk gauge data for bbox:', bbox, 'codes:', codes);
     
     try {
       const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous/items`));
       
-      // Get all gauge height data in the bbox in one request
+      // Clip by bbox and request JSON
       url.searchParams.set('bbox', bbox.join(','));
-      url.searchParams.set('parameter_code', '00065'); // Gage height only
       url.searchParams.set('f', 'json');
-      url.searchParams.set('limit', '1000');
-      // API key ensured above
+      url.searchParams.set('limit', String(limit));
+
+      // Filter by parameter codes (supports single or multiple)
+      if (codes.length === 1) {
+        url.searchParams.set('parameter_code', codes[0]);
+      } else if (codes.length > 1) {
+        url.searchParams.set('filter-lang', 'cql-text');
+        const quoted = codes.map((c) => `'${c}'`).join(',');
+        url.searchParams.set('filter', `parameter_code IN (${quoted})`);
+      }
 
       console.log('Making bulk gauge data request to:', url.toString());
       
@@ -669,76 +681,49 @@ export class USGSService {
       const addWithAliases = (id: string, value: USGSLatestValue) => {
         if (!id || typeof id !== 'string') return;
         
-        console.log(`Processing ID: "${id}" for station`);
-        
         // Raw id
         if (!gaugeDataMap.has(id)) {
           gaugeDataMap.set(id, value);
-          console.log(`  Added raw ID: "${id}"`);
         }
         
         // Numeric-only variant (strip agency prefixes like 'USGS-' or 'USGS:')
         const numeric = id.replace(/^USGS[:\-]?/i, '');
         if (numeric !== id && !gaugeDataMap.has(numeric)) {
           gaugeDataMap.set(numeric, value);
-          console.log(`  Added numeric ID: "${numeric}"`);
         }
         
         // Explicit prefixed forms
         const dash = `USGS-${numeric}`;
         if (!gaugeDataMap.has(dash)) {
           gaugeDataMap.set(dash, value);
-          console.log(`  Added dash ID: "${dash}"`);
         }
         
         const colon = `USGS:${numeric}`;
         if (!gaugeDataMap.has(colon)) {
           gaugeDataMap.set(colon, value);
-          console.log(`  Added colon ID: "${colon}"`);
         }
         
         // Additional variations for better matching
         const cleanNumeric = numeric.replace(/[^0-9]/g, '');
         if (cleanNumeric !== numeric && !gaugeDataMap.has(cleanNumeric)) {
           gaugeDataMap.set(cleanNumeric, value);
-          console.log(`  Added clean numeric ID: "${cleanNumeric}"`);
         }
       };
 
-      data.features?.forEach((feature: any, index: number) => {
-        if (feature?.properties?.parameter_code !== '00065') return;
-        
-        const props = feature.properties || {};
-        console.log(`Feature ${index}:`, {
-          id: feature.id,
-          props: {
-            monitoring_location_id: props.monitoring_location_id,
-            monitoring_location_identifier: props.monitoring_location_identifier,
-            monitoring_location_number: props.monitoring_location_number,
-            site_no: props.site_no,
-            parameter_code: props.parameter_code,
-            value: props.value
-          }
-        });
-        
+      data.features?.forEach((feature: any) => {
+        const props = feature?.properties || {};
         const candidates: Array<string | undefined> = [
+          props.monitoring_location_number,
           props.monitoring_location_id,
           props.monitoring_location_identifier,
-          props.monitoring_location_number,
-          feature.id,
+          feature?.id,
           props.site_no,
         ];
-        
         const first = candidates.find((v) => typeof v === 'string' && v.length > 0);
-        if (first) {
-          addWithAliases(String(first), feature);
-        } else {
-          console.warn(`No valid ID found for feature ${index}:`, feature);
-        }
+        if (first) addWithAliases(String(first), feature);
       });
       
       console.log(`Bulk fetch returned gauge data for ${gaugeDataMap.size} locations`);
-      console.log('Available IDs in map:', Array.from(gaugeDataMap.keys()));
       this.setCache(cacheKey, gaugeDataMap);
       return gaugeDataMap;
     } catch (error) {

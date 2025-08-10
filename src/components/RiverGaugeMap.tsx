@@ -96,109 +96,62 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     const abortController = new AbortController();
     (loadGaugeLocations as any).abortController = abortController;
     console.log('Starting gauge location load for bbox:', bbox);
-    try {
-      const LIMIT = 500;
-      // Definitive threshold check with limit=1001, with a timeout
-      let decided = false;
-      const controller = new AbortController();
-      const timer = setTimeout(() => {
-        if (!decided) {
-          if (requestIdRef.current !== myRequestId) return;
-          // keep gate when count is slow/unavailable
-          setCountUnavailable(true);
-          setRenderMode('countUnavailable');
-        }
-        controller.abort();
-      }, 15000);
-
-      let total: number | null = null;
-      let proceedWithMarkers = false;
       try {
-        const t0 = Date.now();
-        const { total: t, exceedsThreshold } = await usgsService.fetchMonitoringLocationsCount(bbox, controller.signal, LIMIT);
-        clearTimeout(timer);
-        {
-          setDebugInfo(prev => ({ ...(prev || { bbox }), bbox, preflight: { numberReturned: t ?? undefined, elapsedMs: Date.now() - t0, exceeds: exceedsThreshold }, full: prev?.full ?? null, running: false }));
-        }
-        if (exceedsThreshold) {
-          if (requestIdRef.current !== myRequestId) return;
-          setTooManyInExtent({ total: 1001 });
-          setRenderMode('blocked');
-          decided = true;
-        } else {
-          total = t ?? 0;
-          if (requestIdRef.current !== myRequestId) return;
-          proceedWithMarkers = true;
-          setRenderMode('markers');
-          setTooManyInExtent(null);
-          setCountUnavailable(false);
-          decided = true;
-        }
-      } catch (e) {
-        clearTimeout(timer);
-        // Preflight failed: proceed with capped markers but show count-unavailable banner
-        if (requestIdRef.current !== myRequestId) return;
-        setCountUnavailable(true);
-        setRenderMode('countUnavailable');
-        proceedWithMarkers = true;
-      }
+        // Use OGC latest-continuous clipped to bbox so we only show sites with recent data
+        setRenderMode('markers');
+        setTooManyInExtent(null);
+        setCountUnavailable(false);
+        setFetchProgress({ fetched: 0, total: undefined });
 
-      if (!proceedWithMarkers) return; // gated: no markers when definitively exceeded
+        const bulkMap = await usgsService.fetchBulkGaugeData(bbox, {
+          parameterCodes: ['00060', '00065'],
+          limit: 10000,
+        });
 
-      // Proceed to fetch locations; results will be capped via maxFeatures when needed
-      const locations = await usgsService.getGaugeLocationsOnly(bbox, {
-        onProgress: (fetched, total) => {
-          setFetchProgress({ fetched, total });
-        },
-        onPage: (features) => {
-          const valid = features.map((f: any) => ({
-            id: f.id || f.properties?.monitoring_location_number,
-            name: f.properties?.monitoring_location_name || `Site ${f.properties?.monitoring_location_number}`,
-            siteId: f.properties?.monitoring_location_number,
-            coordinates: (f.geometry?.coordinates || f.properties?.coordinates) as [number, number],
-            siteType: f.properties?.site_type_cd || f.properties?.site_type_code || 'ST',
+        const seen = new Set<string>();
+        const valid: any[] = [];
+        for (const feature of bulkMap.values()) {
+          const f: any = feature as any;
+          const props = f?.properties || {};
+          let id: string = String(
+            props.monitoring_location_number ||
+            props.monitoring_location_id ||
+            props.monitoring_location_identifier ||
+            f.id ||
+            props.site_no || ''
+          ).replace(/^USGS[:\-]?/i, '');
+          if (!id) continue;
+          if (seen.has(id)) continue;
+
+          const coords = Array.isArray(f?.geometry?.coordinates) ? f.geometry.coordinates as [number, number] : null;
+          if (!coords) continue;
+          const [lng, lat] = coords;
+          if (typeof lng !== 'number' || typeof lat !== 'number') continue;
+          if (isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) continue;
+
+          seen.add(id);
+          valid.push({
+            id,
+            name: props.monitoring_location_name || `Site ${id}`,
+            siteId: id,
+            coordinates: [lng, lat] as [number, number],
+            siteType: props.site_type_code || 'ST',
             isDemo: false,
-          })).filter((l: any) => Array.isArray(l.coordinates) && l.coordinates.length === 2);
-          // Deduplicate by siteId while streaming pages
-          setBasicGaugeLocations(prev => {
-            const map = new Map<string, any>(prev.map(p => [p.siteId, p]));
-            for (const v of valid) {
-              map.set(v.siteId, v);
-            }
-            return Array.from(map.values());
           });
-        },
-        signal: abortController.signal,
-        maxFeatures: 500,
-      });
-      console.log('Received locations:', locations);
-      
-      // Filter out any locations with invalid coordinates
-      const validLocations = locations.filter(location => {
-        const [lng, lat] = location.coordinates;
-        if (typeof lng !== 'number' || typeof lat !== 'number' || 
-            isNaN(lng) || isNaN(lat) || 
-            lng < -180 || lng > 180 || lat < -90 || lat > 90) {
-          console.warn('Filtering out invalid location:', location.name, location.coordinates);
-          return false;
         }
-        return true;
-      });
 
-      console.log(`Filtered ${validLocations.length} valid locations from ${locations.length} total`);
-      setBasicGaugeLocations(validLocations);
-      setIsUsingDemoData(false);
-      console.log(`Loaded ${validLocations.length} gauge locations, isDemo: ${validLocations.length > 0 && validLocations[0].isDemo}`);
-
-    } catch (error) {
-      console.error('Error loading gauge locations:', error);
-    } finally {
-      setIsLoading(false);
-      setFetchProgress(null);
-      if ((loadGaugeLocations as any).abortController === abortController) {
-        (loadGaugeLocations as any).abortController = null;
+        setBasicGaugeLocations(valid);
+        setIsUsingDemoData(false);
+        console.log(`Loaded ${valid.length} latest sites with recent data in view`);
+      } catch (error) {
+        console.error('Error loading gauge locations:', error);
+      } finally {
+        setIsLoading(false);
+        setFetchProgress(null);
+        if ((loadGaugeLocations as any).abortController === abortController) {
+          (loadGaugeLocations as any).abortController = null;
+        }
       }
-    }
   }, [map, isLoading]);
 
   // Monitor rate limiting status
