@@ -1,7 +1,10 @@
 /// <reference types="google.maps" />
 import { useEffect, useRef, useCallback } from 'react';
+import React from 'react';
+import { createRoot } from 'react-dom/client';
 import { usgsService } from '@/services/usgs-api';
-import { colorForValue, PARAM_LABEL } from '@/lib/datasets';
+import { colorForValue } from '@/lib/datasets';
+import { SitePopup } from '@/components/SitePopup';
 
 interface BasicLocation {
   siteId: string;
@@ -10,6 +13,7 @@ interface BasicLocation {
   siteType: string;
   params?: Array<{ code: string; value: number; unit?: string; time?: string; label?: string }>;
 }
+
 
 interface GaugeMarkersProps {
   map: google.maps.Map | null;
@@ -40,44 +44,6 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
     return colorForValue(activeCode, value, (t as any) || null);
   };
 
-  const buildAttributesHtml = (attrs: Record<string, any>) => {
-    const rows = Object.entries(attrs)
-      .sort(([a],[b]) => a.localeCompare(b))
-      .map(([key, val]) => {
-        const value = typeof val === 'object' ? JSON.stringify(val) : String(val);
-        return `<div class="flex justify-between gap-3"><span class="font-medium">${key}</span><span class="text-right">${value}</span></div>`;
-      })
-      .join('');
-    return rows || '<div class="text-muted-foreground">No attributes available.</div>';
-  };
-
-  const buildMeasurementsHtml = (features: any[]) => {
-    if (!Array.isArray(features) || features.length === 0) {
-      return '<div class="text-muted-foreground">No recent measurements.</div>';
-    }
-    const rows = features
-      .map((f: any) => {
-        const p = f?.properties || {};
-        const code = p.parameter_code || p.observed_property_code;
-        const label = p.parameter_name || p.observed_property_name || PARAM_LABEL[code] || code || 'Measurement';
-        const unit = p.unit || p.unit_of_measurement || p.unit_of_measure || '';
-        const time = p.time || p.datetime || p.result_time || '';
-        const val = Number(p.value ?? p.result);
-        // Tag only for active dataset code
-        let tag = '';
-        const t = thresholds?.[activeCode];
-        if (code === activeCode && t && Number.isFinite(val)) {
-          tag = val <= t.q33 ? 'Low' : val >= t.q66 ? 'High' : 'Med';
-        }
-        return `<div class="space-y-0.5">
-          <div class="font-medium">${label} (${code})</div>
-          <div class="text-sm">Value: <span class="font-mono">${Number.isFinite(val) ? val : 'N/A'}</span>${unit ? ` ${unit}` : ''}${tag ? ` — <span class=\"font-semibold\">${tag}</span>` : ''}</div>
-          ${time ? `<div class="text-xs text-muted-foreground">${new Date(time).toLocaleString()}</div>` : ''}
-        </div>`;
-      })
-      .join('<hr class="my-2" />');
-    return rows;
-  };
 
   const createMarker = useCallback((location: BasicLocation) => {
     if (!map || !window.google) return null;
@@ -120,35 +86,38 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
     }
 
     marker.addListener('click', async () => {
-      // Open a lightweight InfoWindow immediately
+      // Create container and open InfoWindow immediately
       infoWindowRef.current?.close();
-      infoWindowRef.current = new google.maps.InfoWindow({
-        content: `<div class="p-3 max-w-sm"><div class="font-semibold mb-1">${location.name}</div><div class="text-sm">Loading data…</div></div>`
-      });
+      const container = document.createElement('div');
+      container.className = 'max-w-sm';
+      container.innerHTML = `<div class="p-3 max-w-sm"><div class="font-semibold mb-1">${location.name}</div><div class="text-sm">Loading data…</div></div>`;
+      infoWindowRef.current = new google.maps.InfoWindow({ content: container });
       infoWindowRef.current.open(map, marker);
+
+      let root: ReturnType<typeof createRoot> | null = null;
+      const closeListener = google.maps.event.addListenerOnce(infoWindowRef.current, 'closeclick', () => {
+        try { root?.unmount?.(); } catch {}
+        root = null;
+      });
 
       try {
         const { attributes, latest } = await usgsService.getGaugeFullInfo(location.siteId);
-        const attrsHtml = buildAttributesHtml(attributes || {});
-        const measurementsHtml = buildMeasurementsHtml(latest || []);
-        const content = `
-          <div class="p-3 max-w-sm">
-            <h3 class="font-semibold text-primary mb-2">${location.name}</h3>
-            <div class="text-xs text-muted-foreground mb-2">${lat.toFixed(4)}, ${lng.toFixed(4)} • ${location.siteId}</div>
-            <div class="space-y-3">
-              <div>
-                <div class="text-sm mb-1 font-semibold">Site attributes</div>
-                <div class="space-y-1">${attrsHtml}</div>
-              </div>
-              <div>
-                <div class="text-sm mb-1 font-semibold">Latest measurements</div>
-                <div class="space-y-2">${measurementsHtml}</div>
-              </div>
-            </div>
-          </div>`;
-        infoWindowRef.current.setContent(content);
+        // Render React popup
+        root = createRoot(container);
+        root.render(
+          React.createElement(SitePopup, {
+            site: { siteId: location.siteId, name: location.name, coordinates: location.coordinates, siteType: location.siteType },
+            latestFeatures: latest || [],
+            activeCode,
+            thresholds: (thresholds?.[activeCode] as any) || null,
+            onCenter: () => {
+              map?.panTo({ lat: location.coordinates[1], lng: location.coordinates[0] });
+              if (map?.getZoom && (map.getZoom() ?? 0) < 12) map.setZoom(12);
+            }
+          })
+        );
       } catch (e) {
-        infoWindowRef.current.setContent(`<div class="p-3 max-w-sm"><div class="font-semibold mb-1">${location.name}</div><div class="text-sm text-destructive">Failed to load data.</div></div>`);
+        container.innerHTML = `<div class="p-3 max-w-sm"><div class="font-semibold mb-1">${location.name}</div><div class="text-sm text-destructive">Failed to load data.</div></div>`;
       }
     });
 
@@ -183,7 +152,7 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
           fillOpacity: 0.9,
           strokeColor: '#ffffff',
           strokeWeight: 2,
-        };
+        } as any;
         marker.setIcon(nextIcon);
       } else {
         marker = createMarker(loc) as google.maps.Marker | null;

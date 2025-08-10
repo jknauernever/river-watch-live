@@ -904,6 +904,78 @@ export class USGSService {
     return this.enhanceGaugeStationsWithData(basicStations, bbox); // Pass bbox for bulk optimization
   }
 
+  // Helpers for time series endpoints
+  private normalizeIds(siteId: string): string[] {
+    const numeric = siteId.replace(/^USGS[:\-]?/i, '');
+    return [siteId, `USGS-${numeric}`, `USGS:${numeric}`, numeric];
+  }
+  private async fetchPaged(url: string, signal?: AbortSignal): Promise<any[]> {
+    let next: string | null = url;
+    const out: any[] = [];
+    while (next) {
+      next = ensureApiKeyOnString(next);
+      const resp = await fetch(next, { signal, headers: { Accept: 'application/json' } });
+      if (!resp.ok) throw new Error(`USGS ${resp.status}`);
+      const j = await resp.json();
+      const feats = Array.isArray(j.features) ? j.features : [];
+      out.push(...feats);
+      const nxt = Array.isArray(j.links) ? j.links.find((l: any) => l.rel === 'next' && typeof l.href === 'string') : null;
+      next = nxt?.href || null;
+    }
+    return out;
+  }
+
+  async fetchObservationsSeries(siteId: string, code: string, start: Date, end: Date, signal?: AbortSignal): Promise<{ t:number; v:number }[]> {
+    const cacheKey = `obs-${siteId}-${code}-${start.toISOString()}-${end.toISOString()}`;
+    const cached = this.getCached<{ t:number; v:number }[]>(cacheKey);
+    if (cached) return cached;
+    const ids = this.normalizeIds(siteId);
+    for (const id of ids) {
+      try {
+        const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' });
+        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/observations/items?${p.toString()}`));
+        const feats = await this.fetchPaged(url.toString(), signal);
+        const series = feats
+          .map((f: any) => ({ t: Date.parse(f?.properties?.time), v: Number(f?.properties?.value) }))
+          .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
+          .sort((a, b) => a.t - b.t);
+        if (series.length > 0) {
+          this.setCache(cacheKey, series);
+          return series;
+        }
+      } catch (e: any) {
+        if (e?.name === 'AbortError') throw e;
+        // try next id variant
+      }
+    }
+    return [];
+  }
+
+  async fetchDailyMeansSeries(siteId: string, code: string, start: Date, end: Date, signal?: AbortSignal): Promise<{ t:number; v:number }[]> {
+    const cacheKey = `daily-${siteId}-${code}-${start.toISOString()}-${end.toISOString()}`;
+    const cached = this.getCached<{ t:number; v:number }[]>(cacheKey);
+    if (cached) return cached;
+    const ids = this.normalizeIds(siteId);
+    for (const id of ids) {
+      try {
+        const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' });
+        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily/items?${p.toString()}`));
+        const feats = await this.fetchPaged(url.toString(), signal);
+        const series = feats
+          .map((f: any) => ({ t: Date.parse(f?.properties?.time), v: Number(f?.properties?.value) }))
+          .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
+          .sort((a, b) => a.t - b.t);
+        if (series.length > 0) {
+          this.setCache(cacheKey, series);
+          return series;
+        }
+      } catch (e: any) {
+        if (e?.name === 'AbortError') throw e;
+      }
+    }
+    return [];
+  }
+
   async fetchHistoricalData(
     siteId: string, 
     startDate: string, 

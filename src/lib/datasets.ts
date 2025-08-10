@@ -59,6 +59,12 @@ export const COLOR_BY_CODE: Record<string, {type:'sequential'|'diverging', color
   '00095': { type: 'diverging',  colors: { low:'#2c7bb6', med:'#ffffbf', high:'#d7191c' }},
 };
 
+// ===== Units per parameter code =====
+export const PARAM_UNIT: Record<string, string> = {
+  '00065':'ft','00060':'ft³/s','00010':'°C','00400':'pH','00300':'mg/L',
+  '99133':'mg/L as N','63680':'FNU','80154':'mg/L','00095':'µS/cm'
+};
+
 // ===== Quantiles + color mapping =====
 export type Thresholds = { min:number; q33:number; q66:number; max:number };
 
