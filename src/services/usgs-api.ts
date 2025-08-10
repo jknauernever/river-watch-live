@@ -733,7 +733,10 @@ export class USGSService {
           console.log(`  ✗ No match found for station ${station.name} (${station.siteId})`);
         }
         
-        const height = latestValue?.properties?.value;
+        // Coerce value to a number (API may return a string)
+        const rawValue: any = (latestValue as any)?.properties?.value as any;
+        const parsed = typeof rawValue === 'number' ? rawValue : (rawValue != null ? parseFloat(String(rawValue)) : NaN);
+        const height = Number.isFinite(parsed) ? parsed : undefined;
         const waterLevel: WaterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
         
         return {
@@ -743,7 +746,7 @@ export class USGSService {
           coordinates: station.coordinates,
           latestHeight: height,
           waterLevel,
-          lastUpdated: latestValue?.properties?.datetime,
+          lastUpdated: (latestValue as any)?.properties?.time || (latestValue as any)?.properties?.datetime,
         };
       });
 
@@ -764,14 +767,16 @@ export class USGSService {
             const siteId = stations[idx].siteId;
             console.log(`Fetching individual data for site: ${siteId}`);
             const latest = await this.fetchLatestValue(siteId);
-            const height = latest?.properties?.value;
+            const rawValue: any = (latest as any)?.properties?.value as any;
+            const parsed = typeof rawValue === 'number' ? rawValue : (rawValue != null ? parseFloat(String(rawValue)) : NaN);
+            const height = Number.isFinite(parsed) ? parsed : undefined;
             if (typeof height === 'number') {
               console.log(`  ✓ Got height ${height} for ${siteId}`);
               stations[idx] = {
                 ...stations[idx],
                 latestHeight: height,
                 waterLevel: calculateWaterLevel(height),
-                lastUpdated: latest?.properties?.datetime,
+                lastUpdated: (latest as any)?.properties?.time || (latest as any)?.properties?.datetime,
               };
             } else {
               console.log(`  ✗ No height data for ${siteId}`);
@@ -807,7 +812,9 @@ export class USGSService {
         const latestValue = await this.fetchLatestValue(station.siteId);
         console.log(`Latest value for ${station.siteId}:`, latestValue);
         
-        const height = latestValue?.properties?.value;
+        const rawValue: any = (latestValue as any)?.properties?.value as any;
+        const parsed = typeof rawValue === 'number' ? rawValue : (rawValue != null ? parseFloat(String(rawValue)) : NaN);
+        const height = Number.isFinite(parsed) ? parsed : undefined;
         const waterLevel: WaterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
         console.log(`Station ${station.siteId}: height=${height}, waterLevel=`, waterLevel);
 
@@ -818,7 +825,7 @@ export class USGSService {
           coordinates: station.coordinates,
           latestHeight: height,
           waterLevel,
-          lastUpdated: latestValue?.properties?.datetime,
+          lastUpdated: (latestValue as any)?.properties?.time || (latestValue as any)?.properties?.datetime,
         };
       });
 
