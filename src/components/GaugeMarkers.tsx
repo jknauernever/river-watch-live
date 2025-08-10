@@ -7,14 +7,17 @@ interface BasicLocation {
   name: string;
   coordinates: [number, number];
   siteType: string;
+  params?: Array<{ code: string; value: number; unit?: string; time?: string; label?: string }>;
 }
 
 interface GaugeMarkersProps {
   map: google.maps.Map | null;
   basicLocations: BasicLocation[];
+  activeCodes: string[];
+  thresholds: Record<string, { q33: number; q66: number; min: number; max: number } | undefined>;
 }
 
-export const GaugeMarkers = ({ map, basicLocations }: GaugeMarkersProps) => {
+export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: GaugeMarkersProps) => {
   const markersRef = useRef<google.maps.Marker[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
   const markerMapRef = useRef<Map<string, google.maps.Marker>>(new Map());
@@ -25,6 +28,41 @@ export const GaugeMarkers = ({ map, basicLocations }: GaugeMarkersProps) => {
     markerMapRef.current.clear();
     infoWindowRef.current?.close();
   }, []);
+
+  const PARAM_LABEL: Record<string, string> = {
+    '00060': 'Discharge',
+    '00065': 'Gage height',
+    '00010': 'Water temp',
+    '00400': 'pH',
+    '00300': 'Dissolved oxygen',
+    '99133': 'NO₃+NO₂ (as N)',
+    '63680': 'Turbidity',
+    '80154': 'Susp. sediment conc',
+    '00095': 'Specific conductance',
+  };
+
+  const COLOR_LOW = '#d4f0ff';
+  const COLOR_MED = '#4a90e2';
+  const COLOR_HIGH = '#08306b';
+
+  const binRank = (code: string, value: number) => {
+    const t = thresholds?.[code];
+    if (!t || !Number.isFinite(value)) return 1; // treat as medium
+    if (value <= t.q33) return 0;
+    if (value >= t.q66) return 2;
+    return 1;
+  };
+
+  const markerColorForSite = (site: BasicLocation) => {
+    if (!site.params || site.params.length === 0) return COLOR_MED;
+    let maxRank = -1;
+    for (const p of site.params) {
+      if (!activeCodes.includes(p.code)) continue;
+      const r = binRank(p.code, Number(p.value));
+      if (r > maxRank) maxRank = r;
+    }
+    return [COLOR_LOW, COLOR_MED, COLOR_HIGH][Math.max(0, maxRank)];
+  };
 
   const buildAttributesHtml = (attrs: Record<string, any>) => {
     const rows = Object.entries(attrs)
@@ -44,13 +82,16 @@ export const GaugeMarkers = ({ map, basicLocations }: GaugeMarkersProps) => {
     const rows = features
       .map((f: any) => {
         const p = f?.properties || {};
-        const label = p.parameter_name || p.observed_property_name || p.parameter_code || 'Measurement';
-        const unit = p.unit || p.unit_of_measurement || '';
+        const code = p.parameter_code || p.observed_property_code;
+        const label = p.parameter_name || p.observed_property_name || PARAM_LABEL[code] || code || 'Measurement';
+        const unit = p.unit || p.unit_of_measurement || p.unit_of_measure || '';
         const time = p.time || p.datetime || p.result_time || '';
-        const val = p.value ?? p.result ?? 'N/A';
+        const val = Number(p.value ?? p.result);
+        const rank = Number.isFinite(val) ? binRank(String(code), val) : 1;
+        const tag = rank === 0 ? 'Low' : rank === 2 ? 'High' : 'Med';
         return `<div class="space-y-0.5">
-          <div class="font-medium">${label}</div>
-          <div class="text-sm">Value: <span class="font-mono">${val}</span>${unit ? ` ${unit}` : ''}</div>
+          <div class="font-medium">${label} (${code})</div>
+          <div class="text-sm">Value: <span class="font-mono">${Number.isFinite(val) ? val : 'N/A'}</span>${unit ? ` ${unit}` : ''} — <span class="font-semibold">${tag}</span></div>
           ${time ? `<div class="text-xs text-muted-foreground">${new Date(time).toLocaleString()}</div>` : ''}
         </div>`;
       })
@@ -67,6 +108,7 @@ export const GaugeMarkers = ({ map, basicLocations }: GaugeMarkersProps) => {
       isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90
     ) return null;
 
+    const color = markerColorForSite(location);
     const marker = new google.maps.Marker({
       position: { lat, lng },
       map,
@@ -74,7 +116,7 @@ export const GaugeMarkers = ({ map, basicLocations }: GaugeMarkersProps) => {
       icon: {
         path: google.maps.SymbolPath.CIRCLE,
         scale: 8,
-        fillColor: '#1e90ff',
+        fillColor: color,
         fillOpacity: 0.9,
         strokeColor: '#ffffff',
         strokeWeight: 2,
@@ -133,7 +175,7 @@ export const GaugeMarkers = ({ map, basicLocations }: GaugeMarkersProps) => {
     return marker;
   }, [map]);
 
-  // Sync markers with locations
+  // Sync markers with locations and color bins
   useEffect(() => {
     if (!map) return;
 
@@ -151,8 +193,19 @@ export const GaugeMarkers = ({ map, basicLocations }: GaugeMarkersProps) => {
     basicLocations.forEach((loc) => {
       let marker = markerMapRef.current.get(loc.siteId);
       const [lng, lat] = loc.coordinates;
+      const color = markerColorForSite(loc);
       if (marker) {
         marker.setPosition({ lat, lng });
+        const icon = marker.getIcon() as google.maps.Symbol | undefined;
+        const nextIcon: google.maps.Symbol = {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: 8,
+          fillColor: color,
+          fillOpacity: 0.9,
+          strokeColor: '#ffffff',
+          strokeWeight: 2,
+        };
+        marker.setIcon(nextIcon);
       } else {
         marker = createMarker(loc) as google.maps.Marker | null;
         if (marker) {
@@ -165,7 +218,7 @@ export const GaugeMarkers = ({ map, basicLocations }: GaugeMarkersProps) => {
     return () => {
       // no-op here; full cleanup on unmount
     };
-  }, [map, basicLocations, createMarker]);
+  }, [map, basicLocations, createMarker, activeCodes, thresholds]);
 
   // Cleanup on unmount
   useEffect(() => clearMarkers, [clearMarkers]);

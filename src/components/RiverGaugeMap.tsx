@@ -26,16 +26,32 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   
   const [basicGaugeLocations, setBasicGaugeLocations] = useState<any[]>([]);
   
-  
-  
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
   const [countUnavailable, setCountUnavailable] = useState(false);
   const [renderMode, setRenderMode] = useState<'loading' | 'blocked' | 'markers' | 'countUnavailable'>('loading');
   
+  // Parameter filtering and thresholds
+  const [activeCodes, setActiveCodes] = useState<string[]>(['00060','00065']);
+  const [thresholds, setThresholds] = useState<Record<string, { q33:number; q66:number; min:number; max:number }>>({});
+  const [availableCodes, setAvailableCodes] = useState<Set<string>>(new Set());
+  const [unitsByCode, setUnitsByCode] = useState<Record<string, string | undefined>>({});
+  
   const requestIdRef = useRef(0);
   const [debugInfo, setDebugInfo] = useState<{ bbox: [number, number, number, number]; preflight?: { numberReturned?: number; elapsedMs?: number; exceeds?: boolean }; full?: { total: number; pages: number; elapsedMs: number; capped: boolean } | null; running: boolean; match?: { stations: number; matched: number } } | null>(null);
   const preflightPendingRef = useRef(false);
+  
+  const PARAM_LABEL: Record<string, string> = {
+    '00060': 'Discharge',
+    '00065': 'Gage height',
+    '00010': 'Water temp',
+    '00400': 'pH',
+    '00300': 'Dissolved oxygen',
+    '99133': 'NO₃+NO₂ (as N)',
+    '63680': 'Turbidity',
+    '80154': 'Susp. sediment conc',
+    '00095': 'Specific conductance',
+  };
   
   const searchInitializedRef = useRef(false);
 
@@ -97,52 +113,95 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     (loadGaugeLocations as any).abortController = abortController;
     console.log('Starting gauge location load for bbox:', bbox);
       try {
-        // Use OGC latest-continuous clipped to bbox so we only show sites with recent data
+        // Only show sites with recent data for selected parameters
         setRenderMode('markers');
         setTooManyInExtent(null);
         setCountUnavailable(false);
         setFetchProgress({ fetched: 0, total: undefined });
 
+        const codes = activeCodes.length ? activeCodes : ['00060','00065'];
         const bulkMap = await usgsService.fetchBulkGaugeData(bbox, {
-          parameterCodes: ['00060', '00065'],
+          parameterCodes: codes,
           limit: 10000,
         });
 
-        const seen = new Set<string>();
-        const valid: any[] = [];
+        type Site = {
+          id: string; name: string; siteId: string; coordinates: [number, number]; siteType: string; isDemo: boolean;
+          params: Array<{ code: string; value: number; unit?: string; time?: string; label?: string }>;
+        };
+
+        const featuresBySite = new Map<string, Site>();
+        const units: Record<string, string | undefined> = {};
+        const presentCodes = new Set<string>();
+
         for (const feature of bulkMap.values()) {
           const f: any = feature as any;
           const props = f?.properties || {};
+          const code: string | undefined = props.parameter_code || props.observed_property_code;
+          if (!code) continue;
+          presentCodes.add(code);
+
           let id: string = String(
-            props.monitoring_location_number ||
-            props.monitoring_location_id ||
-            props.monitoring_location_identifier ||
-            f.id ||
-            props.site_no || ''
+            props.monitoring_location_number || props.monitoring_location_id || props.monitoring_location_identifier || f.id || props.site_no || ''
           ).replace(/^USGS[:\-]?/i, '');
           if (!id) continue;
-          if (seen.has(id)) continue;
 
-          const coords = Array.isArray(f?.geometry?.coordinates) ? f.geometry.coordinates as [number, number] : null;
+          const coords = Array.isArray(f?.geometry?.coordinates) ? (f.geometry.coordinates as [number, number]) : null;
           if (!coords) continue;
           const [lng, lat] = coords;
           if (typeof lng !== 'number' || typeof lat !== 'number') continue;
           if (isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) continue;
 
-          seen.add(id);
-          valid.push({
-            id,
-            name: props.monitoring_location_name || `Site ${id}`,
-            siteId: id,
-            coordinates: [lng, lat] as [number, number],
-            siteType: props.site_type_code || 'ST',
-            isDemo: false,
-          });
+          const value = Number(props.value ?? props.result);
+          if (!Number.isFinite(value)) continue;
+          const unit = props.unit || props.unit_of_measurement || props.unit_of_measure || undefined;
+          const time = props.time || props.datetime || props.result_time || undefined;
+          const label = props.parameter_name || props.observed_property_name || undefined;
+          if (unit && !units[code]) units[code] = unit;
+
+          const existing = featuresBySite.get(id);
+          if (!existing) {
+            featuresBySite.set(id, {
+              id,
+              name: props.monitoring_location_name || `Site ${id}`,
+              siteId: id,
+              coordinates: [lng, lat],
+              siteType: props.site_type_code || 'ST',
+              isDemo: false,
+              params: [{ code, value, unit, time, label }],
+            });
+          } else {
+            existing.params.push({ code, value, unit, time, label });
+          }
         }
 
-        setBasicGaugeLocations(valid);
+        // Build thresholds from values per parameter (q33/q66)
+        const quantile = (sorted: number[], q: number) => {
+          if (!sorted.length) return NaN;
+          const pos = (sorted.length - 1) * q;
+          const base = Math.floor(pos);
+          const rest = pos - base;
+          return sorted[base] + (rest ? (sorted[base + 1] - sorted[base]) * rest : 0);
+        };
+        const valuesByCode: Record<string, number[]> = {};
+        for (const site of featuresBySite.values()) {
+          for (const p of site.params) {
+            (valuesByCode[p.code] ||= []).push(p.value);
+          }
+        }
+        const th: Record<string, { q33:number; q66:number; min:number; max:number }> = {};
+        Object.entries(valuesByCode).forEach(([code, arr]) => {
+          arr.sort((a,b)=>a-b);
+          th[code] = { q33: quantile(arr, 0.33), q66: quantile(arr, 0.66), min: arr[0], max: arr[arr.length-1] };
+        });
+
+        const sites = Array.from(featuresBySite.values());
+        setBasicGaugeLocations(sites);
+        setThresholds(th);
+        setAvailableCodes(presentCodes);
+        setUnitsByCode(units);
         setIsUsingDemoData(false);
-        console.log(`Loaded ${valid.length} latest sites with recent data in view`);
+        console.log(`Loaded ${sites.length} sites with recent data in view across ${Array.from(presentCodes).join(', ')}`);
       } catch (error) {
         console.error('Error loading gauge locations:', error);
       } finally {
@@ -186,8 +245,11 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     };
   }, [map, isLoaded, loadGaugeLocations]);
 
-
-  // Load stations when showRiverData becomes true
+  // Re-fetch when active parameter toggles change
+  useEffect(() => {
+    if (!map || !isLoaded) return;
+    loadGaugeLocations();
+  }, [activeCodes, map, isLoaded, loadGaugeLocations]);
 
   // Periodically update rate limit status
 
@@ -239,24 +301,83 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
         <GaugeMarkers 
           map={map}
           basicLocations={basicGaugeLocations}
+          activeCodes={activeCodes}
+          thresholds={thresholds}
         />
       )}
 
       {/* Header */}
-      <div className="absolute top-4 left-4 right-4 z-10 flex gap-3 items-center pointer-events-none">
-        <Card className="flex-1 max-w-md pointer-events-auto">
+      <div className="absolute top-4 left-4 right-4 z-10 flex flex-col gap-3 pointer-events-none">
+        <div className="flex gap-3 items-center">
+          <Card className="flex-1 max-w-md pointer-events-auto">
+            <CardContent className="p-3">
+              <input
+                id="search-input"
+                type="text"
+                placeholder="Search for a location..."
+                onFocus={handleSearchFocus}
+                className="w-full border-0 outline-none bg-transparent text-foreground placeholder:text-muted-foreground"
+              />
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Parameter toggles */}
+        <Card className="max-w-3xl pointer-events-auto">
           <CardContent className="p-3">
-            <input
-              id="search-input"
-              type="text"
-              placeholder="Search for a location..."
-              onFocus={handleSearchFocus}
-              className="w-full border-0 outline-none bg-transparent text-foreground placeholder:text-muted-foreground"
-            />
+            <div className="flex flex-wrap gap-2">
+              {Object.keys(PARAM_LABEL).map((code) => {
+                const active = activeCodes.includes(code);
+                const available = availableCodes.has(code);
+                return (
+                  <Button
+                    key={code}
+                    size="sm"
+                    variant={active ? 'secondary' : 'outline'}
+                    disabled={!available && !active}
+                    onClick={() => {
+                      setActiveCodes((prev) => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
+                    }}
+                  >
+                    {code} · {PARAM_LABEL[code] || code}
+                  </Button>
+                );
+              })}
+            </div>
           </CardContent>
         </Card>
-        
 
+        {/* Legend */}
+        <Card className="max-w-3xl pointer-events-auto">
+          <CardContent className="p-3">
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap gap-2 text-sm">
+                {activeCodes.map((c) => (
+                  <Badge key={c} variant="secondary">{c} · {PARAM_LABEL[c] || c}</Badge>
+                ))}
+              </div>
+              <div className="space-y-1">
+                <div className="h-2 rounded" style={{ background: 'linear-gradient(to right, #d4f0ff, #4a90e2, #08306b)' }} />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Low</span>
+                  <span>Med</span>
+                  <span>High</span>
+                </div>
+                {activeCodes.length === 1 && thresholds[activeCodes[0]] && (
+                  <div className="text-xs text-muted-foreground">
+                    {(() => {
+                      const code = activeCodes[0];
+                      const t = thresholds[code]!;
+                      const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
+                      const fmt = (n: number) => Number.isFinite(n) ? n.toLocaleString() : '—';
+                      return `${fmt(t.min)} | ${fmt(t.q33)} | ${fmt(t.q66)} | ${fmt(t.max)}${unit}`;
+                    })()}
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Rate Limiting Status */}
