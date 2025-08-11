@@ -1063,63 +1063,87 @@ export class USGSService {
     };
 
     for (const id of ids) {
-      // Prefer modern daily endpoint with datetime
-      const series = await tryDailyDatetime(id);
-      if (signal?.aborted) return [];
-      if (series.length > 0) { this.setCache(cacheKey, series); return series; }
-
-      // Fallbacks for older shapes
-      const attempts: Array<Promise<{ t:number; v:number }[]>> = [
-        (async () => {
-          const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', start: start.toISOString(), end: end.toISOString(), limit: '20000' } as any);
-          const u = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items?${params.toString()}`));
-          try { return parseSeries(await this.fetchPaged(u.toString(), signal)); } catch { return []; }
-        })(),
-        (async () => {
-          const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' } as any);
-          const u = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items?${params.toString()}`));
-          try { return parseSeries(await this.fetchPaged(u.toString(), signal)); } catch { return []; }
-        })(),
-        (async () => {
-          // Legacy NWIS Daily Values fallback
-          try {
-            const numeric = id.replace(/^USGS[:\-]?/i, '');
-            const dv = new URL('https://waterservices.usgs.gov/nwis/dv/');
-            dv.searchParams.set('format', 'json');
-            dv.searchParams.set('sites', numeric);
-            dv.searchParams.set('parameterCd', code);
-            dv.searchParams.set('statCd', '00003');
-            dv.searchParams.set('startDT', start.toISOString().slice(0,10));
-            dv.searchParams.set('endDT', end.toISOString().slice(0,10));
-            const resp = await fetch(dv.toString(), { signal, headers: { Accept: 'application/json' } });
-            if (!resp.ok) return [];
-            const j = await resp.json();
-            const tsArr = j?.value?.timeSeries || [];
-            const out: { t:number; v:number }[] = [];
-            for (const ts of tsArr) {
-              const varCode = ts?.variable?.variableCode?.[0]?.value;
-              if (varCode !== code) continue;
-              const vals = ts?.values || [];
-              for (const block of vals) {
-                const arr = block?.value || [];
-                for (const it of arr) {
-                  const t = Date.parse(it?.dateTime);
-                  const v = Number(it?.value);
-                  if (Number.isFinite(t) && Number.isFinite(v)) out.push({ t, v });
-                }
+      // 1) Prefer stable NWIS Daily Values (statCd=00003)
+      try {
+        const numeric = id.replace(/^USGS[:\-]?/i, '');
+        const dv = new URL('https://waterservices.usgs.gov/nwis/dv/');
+        dv.searchParams.set('format', 'json');
+        dv.searchParams.set('sites', numeric);
+        dv.searchParams.set('parameterCd', code);
+        dv.searchParams.set('statCd', '00003');
+        dv.searchParams.set('startDT', start.toISOString().slice(0,10));
+        dv.searchParams.set('endDT', end.toISOString().slice(0,10));
+        const resp = await fetch(dv.toString(), { signal, headers: { Accept: 'application/json' } });
+        if (resp.ok) {
+          const j = await resp.json();
+          const tsArr = j?.value?.timeSeries || [];
+          const out: { t:number; v:number }[] = [];
+          for (const ts of tsArr) {
+            const varCode = ts?.variable?.variableCode?.[0]?.value;
+            if (varCode !== code) continue;
+            const vals = ts?.values || [];
+            for (const block of vals) {
+              const arr = block?.value || [];
+              for (const it of arr) {
+                const t = Date.parse(it?.dateTime);
+                const v = Number(it?.value);
+                if (Number.isFinite(t) && Number.isFinite(v)) out.push({ t, v });
               }
             }
-            out.sort((a,b)=>a.t-b.t);
-            return out;
-          } catch {
-            return [];
           }
-        })(),
+          out.sort((a,b)=>a.t-b.t);
+          if (out.length > 0) { this.setCache(cacheKey, out); return out; }
+        }
+      } catch (_) { /* continue */ }
+
+      // 2) OGC daily-values with various statistic params
+      const ogcAttempts: Array<() => Promise<{ t:number; v:number }[]>> = [
+        async () => {
+          const dt = `${start.toISOString()}/${end.toISOString()}`;
+          const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+          url.searchParams.set('monitoring_location_id', id);
+          url.searchParams.set('parameter_code', code);
+          url.searchParams.set('statistic_id', '00003');
+          url.searchParams.set('datetime', dt);
+          url.searchParams.set('limit', '20000');
+          url.searchParams.set('f', 'json');
+          const feats = await this.fetchPaged(url.toString(), signal); return parseSeries(feats);
+        },
+        async () => {
+          const dt = `${start.toISOString()}/${end.toISOString()}`;
+          const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+          url.searchParams.set('monitoring_location_id', id);
+          url.searchParams.set('parameter_code', code);
+          url.searchParams.set('statistic_code', '00003');
+          url.searchParams.set('datetime', dt);
+          url.searchParams.set('limit', '20000');
+          url.searchParams.set('f', 'json');
+          const feats = await this.fetchPaged(url.toString(), signal); return parseSeries(feats);
+        },
+        async () => {
+          const dt = `${start.toISOString()}/${end.toISOString()}`;
+          const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+          url.searchParams.set('monitoring_location_id', id);
+          url.searchParams.set('parameter_code', code);
+          url.searchParams.set('datetime', dt);
+          url.searchParams.set('limit', '20000');
+          url.searchParams.set('f', 'json');
+          const feats = await this.fetchPaged(url.toString(), signal); return parseSeries(feats);
+        },
+        // Older path fallback
+        async () => {
+          const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', start: start.toISOString(), end: end.toISOString(), limit: '20000' } as any);
+          const u = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily/items?${params.toString()}`));
+          try { const feats = await this.fetchPaged(u.toString(), signal); return parseSeries(feats); } catch { return []; }
+        },
       ];
-      for (const p of attempts) {
-        const s = await p;
-        if (signal?.aborted) return [];
-        if (s.length > 0) { this.setCache(cacheKey, s); return s; }
+
+      for (const attempt of ogcAttempts) {
+        try {
+          const s = await attempt();
+          if (signal?.aborted) return [];
+          if (s.length > 0) { this.setCache(cacheKey, s); return s; }
+        } catch (_) { /* try next */ }
       }
     }
 
