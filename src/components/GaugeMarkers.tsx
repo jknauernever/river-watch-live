@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { usgsService } from '@/services/usgs-api';
 import { colorForValue } from '@/lib/datasets';
 import { SitePopup } from '@/components/SitePopup';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 interface BasicLocation {
   siteId: string;
@@ -128,14 +129,16 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, haz
       }));
       root = createRoot(container);
       root.render(
-        React.createElement(SitePopup, {
-          site: { siteId: location.siteId, name: location.name, coordinates: location.coordinates, siteType: location.siteType },
-          attributes: null,
-          latestFeatures: initialLatest,
-          activeCode,
-          thresholds: (thresholds?.[activeCode] as any) || null,
-          hazard: hazardBySite?.[location.siteId],
-        })
+        React.createElement(TooltipProvider, null,
+          React.createElement(SitePopup, {
+            site: { siteId: location.siteId, name: location.name, coordinates: location.coordinates, siteType: location.siteType },
+            attributes: null,
+            latestFeatures: initialLatest,
+            activeCode,
+            thresholds: (thresholds?.[activeCode] as any) || null,
+            hazard: hazardBySite?.[location.siteId],
+          })
+        )
       );
 
       // Fetch in background and update when available
@@ -143,14 +146,16 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, haz
         const { attributes, latest } = await usgsService.getGaugeFullInfo(location.siteId);
         if (!root) return; // closed
         root.render(
-          React.createElement(SitePopup, {
-            site: { siteId: location.siteId, name: location.name, coordinates: location.coordinates, siteType: location.siteType },
-            attributes: attributes || null,
-            latestFeatures: latest && latest.length > 0 ? latest : initialLatest,
-            activeCode,
-            thresholds: (thresholds?.[activeCode] as any) || null,
-            hazard: hazardBySite?.[location.siteId],
-          })
+          React.createElement(TooltipProvider, null,
+            React.createElement(SitePopup, {
+              site: { siteId: location.siteId, name: location.name, coordinates: location.coordinates, siteType: location.siteType },
+              attributes: attributes || null,
+              latestFeatures: latest && latest.length > 0 ? latest : initialLatest,
+              activeCode,
+              thresholds: (thresholds?.[activeCode] as any) || null,
+              hazard: hazardBySite?.[location.siteId],
+            })
+          )
         );
       } catch (e) {
         // keep initial render; optionally we could show error state
