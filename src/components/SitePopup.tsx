@@ -96,20 +96,54 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
     return () => ac.abort();
   }, [site.siteId, activeCode, mode]);
 
-  // Simple sparkline SVG
-  const Sparkline = ({ data, height=56, padding=4 }: { data: TV[]; height?: number; padding?: number }) => {
-    const width = 220;
-    const h = height; const w = width;
+  // Sparkline SVG with axes
+  const Sparkline = ({ data, height = 96, mode }: { data: TV[]; height?: number; mode: '14d' | 'year' }) => {
+    const width = 240;
+    const w = width; const h = height;
+    const padL = 34, padR = 6, padT = 6, padB = 18;
     if (!data || data.length === 0) return <div className="text-xs text-muted-foreground">No data in this period.</div>;
-    const xs = data.map(d=>d.t), ys = data.map(d=>d.v);
+    const xs = data.map(d => d.t), ys = data.map(d => d.v);
     const x0 = Math.min(...xs), x1 = Math.max(...xs);
-    const y0 = Math.min(...ys), y1 = Math.max(...ys);
-    const x = (t:number)=> padding + (w-2*padding) * (x1===x0? 0 : (t-x0)/(x1-x0));
-    const y = (v:number)=> (h-padding) - (h-2*padding) * (y1===y0? 0.5 : (v-y0)/(y1-y0));
+    const yMin = Math.min(...ys), yMax = Math.max(...ys);
+    const yPad = (yMax - yMin) * 0.1 || 1;
+    const y0 = yMin - yPad, y1 = yMax + yPad;
+    const x = (t:number)=> padL + (w - padL - padR) * (x1===x0 ? 0 : (t - x0) / (x1 - x0));
+    const y = (v:number)=> (h - padB) - (h - padT - padB) * (y1===y0 ? 0.5 : (v - y0) / (y1 - y0));
     const d = data.map((pt,i)=> `${i?'L':'M'}${x(pt.t).toFixed(1)},${y(pt.v).toFixed(1)}`).join(' ');
     const stroke = COLOR_BY_CODE[activeCode]?.colors.high || '#0ea5e9';
+    const fmtY = (v:number) => {
+      const a = Math.abs(v);
+      if (a >= 1000) return v.toFixed(0);
+      if (a >= 10) return v.toFixed(1);
+      return v.toFixed(2);
+    };
+    const fmtX = (t:number) => {
+      const d = new Date(t);
+      return mode === 'year'
+        ? d.toLocaleDateString(undefined, { month: 'short' })
+        : `${d.getMonth()+1}/${d.getDate()}`;
+    };
+    const xTicks = [x0, x0 + (x1 - x0) / 2, x1];
+    const yTicks = [y0, (y0 + y1) / 2, y1];
     return (
-      <svg width={w} height={h} role="img" aria-label={`${PARAM_LABEL[activeCode] || activeCode} history`}>
+      <svg width={w} height={h} role="img" aria-label={`${PARAM_LABEL[activeCode] || activeCode} history`} className="text-muted-foreground">
+        {/* Axes */}
+        <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke="currentColor" strokeWidth={0.5} />
+        <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke="currentColor" strokeWidth={0.5} />
+        {/* Grid + tick labels */}
+        {yTicks.map((v, i) => (
+          <g key={`y-${i}`}>
+            <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="currentColor" opacity={0.2} strokeWidth={0.5} />
+            <text x={padL - 4} y={y(v)} fontSize={10} textAnchor="end" dominantBaseline="central" fill="currentColor">{fmtY(v)}</text>
+          </g>
+        ))}
+        {xTicks.map((t, i) => (
+          <g key={`x-${i}`}>
+            <line x1={x(t)} y1={h - padB} x2={x(t)} y2={h - padB + 3} stroke="currentColor" strokeWidth={0.5} />
+            <text x={x(t)} y={h - 2} fontSize={10} textAnchor={i===0 ? 'start' : i===xTicks.length-1 ? 'end' : 'middle'} fill="currentColor">{fmtX(t)}</text>
+          </g>
+        ))}
+        {/* Data path */}
         <path d={d} fill="none" stroke={stroke} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
       </svg>
     );
@@ -277,6 +311,11 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
           href={`https://waterdata.usgs.gov/monitoring-location/${site.siteId.replace(/^USGS[:\-]?/i,'')}`}
           target="_blank" rel="noreferrer" aria-label="View on USGS"
         >View on USGS</a>
+        <a
+          className="text-xs px-2 py-1 rounded border hover:bg-accent"
+          href={`/site?siteId=${encodeURIComponent(site.siteId)}&name=${encodeURIComponent(site.name)}&lat=${site.coordinates[1]}&lng=${site.coordinates[0]}&code=${activeCode}`}
+          target="_blank" rel="noreferrer" aria-label="Open details"
+        >Open details</a>
         <button className="text-xs px-2 py-1 rounded border hover:bg-accent" onClick={onCenter} aria-label="Center map here">Center here</button>
         <button className="text-xs px-2 py-1 rounded border hover:bg-accent" onClick={() => navigator.clipboard.writeText(site.siteId)} aria-label="Copy site ID">Copy ID</button>
       </div>
@@ -312,7 +351,7 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
         <div className="mt-2">
           {loading && <div className="text-xs text-muted-foreground">Loading chart…</div>}
           {error && <div className="text-xs text-destructive">{error}</div>}
-          {series && !loading && !error && <Sparkline data={series} />}
+          {series && !loading && !error && <Sparkline data={series} mode={mode} />}
         </div>
         <div className="text-[10px] text-muted-foreground mt-1">
           {mode==='14d'
