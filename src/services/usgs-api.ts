@@ -1041,7 +1041,21 @@ export class USGSService {
         url2.searchParams.set('limit', '20000');
         url2.searchParams.set('f', 'json');
         const feats2 = await this.fetchPaged(url2.toString(), signal);
-        return parseSeries(feats2);
+        const p2 = parseSeries(feats2);
+        if (p2.length > 0) return p2;
+      } catch (e:any) {
+        if (e?.name === 'AbortError') throw e;
+      }
+      // Attempt 3: daily-values with no statistic filter (let API choose default)
+      try {
+        const url3 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+        url3.searchParams.set('monitoring_location_id', id);
+        url3.searchParams.set('parameter_code', code);
+        url3.searchParams.set('datetime', dt);
+        url3.searchParams.set('limit', '20000');
+        url3.searchParams.set('f', 'json');
+        const feats3 = await this.fetchPaged(url3.toString(), signal);
+        return parseSeries(feats3);
       } catch (e:any) {
         if (e?.name === 'AbortError') throw e;
         return [] as { t:number; v:number }[];
