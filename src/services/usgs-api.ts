@@ -1,5 +1,6 @@
 import { USGSMonitoringLocation, USGSLatestValue, GaugeStation, WaterLevel, USGSHistoricalData } from '@/types/usgs';
 import { usgsRateLimiter } from './rate-limiter';
+import { FUNCTIONS_URL } from '@/integrations/supabase/urls';
 
 const USGS_BASE_URL = 'https://api.waterdata.usgs.gov/ogcapi/v0';
 const ENV_USGS_API_KEY: string = (import.meta as any)?.env?.VITE_USGS_API_KEY ?? '';
@@ -13,21 +14,23 @@ function getUSGSApiKey(): string {
   }
 }
 
+function ensureProxyUrl(url: URL): URL {
+  // Route all USGS requests via our Supabase edge proxy to avoid exposing API keys client-side
+  const proxied = new URL(`${FUNCTIONS_URL}/usgs-proxy`);
+  proxied.searchParams.set('upstream', url.toString());
+  return proxied;
+}
+
 function ensureApiKey(url: URL): URL {
-  const key = getUSGSApiKey();
-  if (key) {
-    if (!url.searchParams.has('api_key')) url.searchParams.set('api_key', key);
-  } else {
-    console.warn('[USGS] No API key configured; requests may be rate-limited (429).');
-  }
-  return url;
+  // Backwards-compatible wrapper: we now return a proxied URL instead of appending api_key
+  return ensureProxyUrl(url);
 }
 
 function ensureApiKeyOnString(urlString: string | null): string | null {
   if (!urlString) return null;
   try {
     const u = new URL(urlString);
-    return ensureApiKey(u).toString();
+    return ensureProxyUrl(u).toString();
   } catch {
     return urlString;
   }
