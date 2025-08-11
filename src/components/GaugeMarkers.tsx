@@ -30,9 +30,13 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, haz
   const markerMapRef = useRef<Map<string, google.maps.Marker>>(new Map());
 
   const clearMarkers = useCallback(() => {
+    // Remove any markers tracked in array
     markersRef.current.forEach(marker => marker.setMap(null));
     markersRef.current = [];
+    // Also remove any markers tracked in the map
+    markerMapRef.current.forEach((marker) => marker.setMap(null));
     markerMapRef.current.clear();
+    // Close any open infowindow
     infoWindowRef.current?.close();
   }, []);
 
@@ -210,6 +214,7 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, haz
         if (marker) {
           marker.setMap(map);
           markerMapRef.current.set(loc.siteId, marker);
+          markersRef.current.push(marker);
         }
       }
     });
