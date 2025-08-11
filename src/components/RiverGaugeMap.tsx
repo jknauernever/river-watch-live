@@ -232,11 +232,23 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           if (typeof lng !== 'number' || typeof lat !== 'number') continue;
           if (isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) continue;
 
-          const value = Number(props.value ?? props.result);
+          let value = Number(props.value ?? props.result);
           if (!Number.isFinite(value)) continue;
-          const unit = props.unit || props.unit_of_measurement || props.unit_of_measure || undefined;
+          let unit = props.unit || props.unit_of_measurement || props.unit_of_measure || undefined;
           const time = props.time || props.datetime || props.result_time || undefined;
           const label = props.parameter_name || props.observed_property_name || undefined;
+
+          // Normalize stage (00065) to feet
+          if (code === '00065') {
+            const u = (unit || '').toLowerCase();
+            if (u === 'm' || u === 'meter' || u === 'metre' || u === 'meters') { value = value * 3.28084; unit = 'ft'; }
+            else if (u === 'cm' || u === 'centimeter' || u === 'centimeters') { value = value / 30.48; unit = 'ft'; }
+            else if (u === 'mm' || u === 'millimeter' || u === 'millimeters') { value = value / 304.8; unit = 'ft'; }
+            else if (!u) {
+              if (value > 200 && value < 20000) { value = value / 30.48; unit = 'ft'; }
+            }
+          }
+
           if (unit && !units[code]) units[code] = unit;
 
           const existing = featuresBySite.get(id);
