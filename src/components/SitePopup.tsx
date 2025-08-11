@@ -152,11 +152,23 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
 
           // Hazard logic for gage height
 
-          // Use hazard prop cleanly
+          // Use hazard prop cleanly + q90 fallback
           if (isActive && isGageHeight && hasValue && (COLOR_BY_CODE['00065'])) {
             const colors: any = (COLOR_BY_CODE['00065']?.colors as any) || {};
             // @ts-ignore - hazard prop added to SitePopupProps
-            const hz = ( (typeof hazard !== 'undefined') ? (hazard as any) : null );
+            const hz = (typeof hazard !== 'undefined') ? (hazard as any) : null;
+
+            // Fallback to q90-based extreme if no hazard provided
+            if (!hz && thresholds && typeof (thresholds as any).q90 === 'number') {
+              const q33 = (thresholds as any).q33 as number;
+              const q66 = (thresholds as any).q66 as number;
+              const q90 = (thresholds as any).q90 as number;
+              if (vNum >= q90) { dotColor = colors.extreme || colors.high; }
+              else if (vNum >= q66) { dotColor = colors.high; }
+              else if (vNum >= q33) { dotColor = colors.med; }
+              else { dotColor = colors.low; }
+            }
+
             if (hz && typeof hz.medThreshold === 'number' && typeof hz.highThreshold === 'number' && typeof hz.extremeThreshold === 'number') {
               if (vNum >= hz.extremeThreshold) { dotColor = colors.extreme || colors.high; tag = { label: 'Extreme Flood', bg: colors.extreme || colors.high }; }
               else if (vNum >= hz.highThreshold) { dotColor = colors.high; tag = { label: 'High', bg: colors.high }; }

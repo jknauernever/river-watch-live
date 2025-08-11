@@ -262,11 +262,10 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
           const p = site.params.find(x => x.code === code);
           if (p && Number.isFinite(p.value)) values.push(p.value);
         }
-        const t = computeThresholds(values);
-        const th: Record<string, { q33:number; q66:number; min:number; max:number }> = t
-          ? { [code]: { q33: t.q33, q66: t.q66, min: t.min, max: t.max } }
-          : {};
-
+const t = computeThresholds(values);
+const th: Record<string, any> = t
+  ? { [code]: { q33: t.q33, q66: t.q66, q90: t.q90, min: t.min, max: t.max } }
+  : {};
 
         const sites = Array.from(featuresBySite.values());
         setBasicGaugeLocations(sites);
