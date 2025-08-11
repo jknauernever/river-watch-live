@@ -363,8 +363,6 @@ let tag: { label: string; bg: string } | null = null;
               <div className="text-[10px] text-muted-foreground mt-1">{legendTicks(thresholds, activeUnit)}</div>
             </>
           )}
-
-        )}
       </div>
 
       {/* Actions removed as per request */}
