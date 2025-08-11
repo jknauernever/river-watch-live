@@ -20,9 +20,10 @@ interface GaugeMarkersProps {
   basicLocations: BasicLocation[];
   activeCodes: string[];
   thresholds: Record<string, { q33: number; q66: number; min: number; max: number } | undefined>;
+  hazardBySite?: Record<string, { medThreshold: number; highThreshold: number; extremeThreshold: number; source?: string; floodStageValue?: number }>;
 }
 
-export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: GaugeMarkersProps) => {
+export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, hazardBySite }: GaugeMarkersProps) => {
   const markersRef = useRef<google.maps.Marker[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
   const markerMapRef = useRef<Map<string, google.maps.Marker>>(new Map());
@@ -39,9 +40,12 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
 
   const siteColor = (site: BasicLocation) => {
     const p = site.params?.find(x => x.code === activeCode);
-    const t = thresholds?.[activeCode];
     const value = Number(p?.value);
-    return colorForValue(activeCode, value, (t as any) || null);
+    const hazard = activeCode === '00065' ? hazardBySite?.[site.siteId] : undefined;
+    const th = hazard
+      ? ({ medThreshold: hazard.medThreshold, highThreshold: hazard.highThreshold, extremeThreshold: hazard.extremeThreshold } as any)
+      : (thresholds?.[activeCode] as any);
+    return colorForValue(activeCode, value, th || null);
   };
 
 
@@ -123,6 +127,7 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
             latestFeatures: latest || [],
             activeCode,
             thresholds: (thresholds?.[activeCode] as any) || null,
+            hazard: hazardBySite?.[location.siteId],
             onCenter: () => {
               map?.panTo({ lat: location.coordinates[1], lng: location.coordinates[0] });
               if (map?.getZoom && (map.getZoom() ?? 0) < 12) map.setZoom(12);
@@ -148,7 +153,7 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
     });
 
     return marker;
-  }, [map]);
+  }, [map, activeCodes, thresholds, hazardBySite]);
 
   // Sync markers with locations and color bins
   useEffect(() => {
@@ -192,7 +197,7 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
     return () => {
       // no-op here; full cleanup on unmount
     };
-  }, [map, basicLocations, createMarker, activeCodes, thresholds]);
+  }, [map, basicLocations, createMarker, activeCodes, thresholds, hazardBySite]);
 
   // Cleanup on unmount
   useEffect(() => clearMarkers, [clearMarkers]);
