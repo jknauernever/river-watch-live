@@ -14,7 +14,7 @@ interface SitePopupProps {
   onCenter?: () => void;
 }
 
-export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFeatures, activeCode, thresholds, onCenter }) => {
+export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFeatures, activeCode, thresholds, hazard, onCenter }) => {
   const [mode, setMode] = useState<'14d'|'year'>('14d');
   const [series, setSeries] = useState<TV[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -151,49 +151,6 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
           let tag: { label: string; bg: string } | null = null;
 
           // Hazard logic for gage height
-          if (isActive && isGageHeight && hasValue && (typeof (arguments as any) !== 'undefined')) {
-            const hz = (arguments as any) ? undefined : undefined; // placeholder to keep TS calm in replace scope
-          }
-          if (isActive && isGageHeight && hasValue && (typeof (SitePopup as any) !== 'undefined')) {
-            const hz = ( (arguments as any) === undefined ? (null as any) : null ); // no-op
-          }
-          if (isActive && isGageHeight && hasValue && (typeof (window) !== 'undefined')) {
-            const hz = ( (SitePopup as any) && (SitePopup as any) ) ? undefined : undefined; // no-op
-          }
-          if (isActive && isGageHeight && hasValue && (typeof (thresholds) !== 'undefined')) {
-            const hz = ( ( (SitePopup as unknown) as any ) && ( (SitePopup as unknown) as any ) ); // no-op
-          }
-
-          if (isActive && isGageHeight && hasValue && (typeof (COLOR_BY_CODE['00065']) !== 'undefined') && (typeof (arguments) !== 'object')) {
-            // Use hazard prop when provided
-          }
-
-          if (isActive && isGageHeight && hasValue && (typeof (COLOR_BY_CODE['00065']) !== 'undefined')) {
-            const colors: any = (COLOR_BY_CODE['00065']?.colors as any) || {};
-            const hz = (SitePopup as any)?.length ? undefined : undefined; // no-op
-          }
-
-          if (isActive && isGageHeight && hasValue && (typeof (COLOR_BY_CODE['00065']) !== 'undefined')) {
-            const colors: any = (COLOR_BY_CODE['00065']?.colors as any) || {};
-            const hz = ( (arguments as any) === undefined ? undefined : undefined );
-          }
-
-          // Real hazard logic using prop
-          if (isActive && isGageHeight && hasValue && (typeof (COLOR_BY_CODE['00065']) !== 'undefined') && (typeof (thresholds) !== 'undefined')) {
-            const colors: any = (COLOR_BY_CODE['00065']?.colors as any) || {};
-            const h = ( (SitePopup as any) && (SitePopup as any) ) ? undefined : undefined;
-          }
-
-          if (isActive && isGageHeight && hasValue && (typeof COLOR_BY_CODE['00065'] !== 'undefined')) {
-            const colors: any = (COLOR_BY_CODE['00065']?.colors as any) || {};
-            const h = ( (arguments as any) === undefined ? undefined : undefined );
-          }
-
-          // Final hazard using provided prop
-          if (isActive && isGageHeight && hasValue && (COLOR_BY_CODE['00065'])) {
-            const colors: any = (COLOR_BY_CODE['00065']?.colors as any) || {};
-            const hz = ( (SitePopup as any) ? undefined : undefined );
-          }
 
           // Use hazard prop cleanly
           if (isActive && isGageHeight && hasValue && (COLOR_BY_CODE['00065'])) {
