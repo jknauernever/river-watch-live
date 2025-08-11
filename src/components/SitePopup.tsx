@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { COLOR_BY_CODE, PARAM_LABEL, legendTicks, Thresholds } from '@/lib/datasets';
+import { COLOR_BY_CODE, PARAM_LABEL, legendTicks, Thresholds, colorForValue, discreteLegendForCode } from '@/lib/datasets';
 import { usgsService } from '@/services/usgs-api';
 import { aggregateMonthly, downsampleEven, formatTimestamp, formatValueWithUnit, gradientCssForCode, pickUnit, TV } from '@/lib/popup-utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -206,11 +206,18 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
           const vNum = Number(r.value);
           const hasValue = Number.isFinite(vNum);
 
-          // Default color/bin
-          let dotColor = isActive && thresholds
-            ? (vNum <= (thresholds as any).q33 ? COLOR_BY_CODE[activeCode].colors.low : vNum >= (thresholds as any).q66 ? COLOR_BY_CODE[activeCode].colors.high : COLOR_BY_CODE[activeCode].colors.med)
-            : '#94a3b8';
-          let tag: { label: string; bg: string } | null = null;
+// Default color/bin
+let dotColor = '#94a3b8';
+if (r.code === '00400' && hasValue) {
+  dotColor = colorForValue('00400', vNum, null);
+} else if (isActive && thresholds) {
+  dotColor = vNum <= (thresholds as any).q33
+    ? COLOR_BY_CODE[activeCode].colors.low
+    : vNum >= (thresholds as any).q66
+      ? COLOR_BY_CODE[activeCode].colors.high
+      : COLOR_BY_CODE[activeCode].colors.med;
+}
+let tag: { label: string; bg: string } | null = null;
 
           // Hazard logic for gage height
 
@@ -338,11 +345,25 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
               })()}
             </div>
           </>
-        ) : (
-          <>
-            <div className="h-2 rounded" style={{ background: gradientCssForCode(activeCode) }} />
-            <div className="text-[10px] text-muted-foreground mt-1">{legendTicks(thresholds, activeUnit)}</div>
-          </>
+) : activeCode === '00400' ? (
+            <>
+              <div className="space-y-1">
+                {(discreteLegendForCode('00400') || []).map((b, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: b.color }} />
+                    <span className="text-xs">{b.label}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-1">EPA recommended range 6.5–8.5</div>
+            </>
+          ) : (
+            <>
+              <div className="h-2 rounded" style={{ background: gradientCssForCode(activeCode) }} />
+              <div className="text-[10px] text-muted-foreground mt-1">{legendTicks(thresholds, activeUnit)}</div>
+            </>
+          )}
+
         )}
       </div>
 

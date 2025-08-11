@@ -13,7 +13,7 @@ import { Loader2, RotateCcw } from 'lucide-react';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { DATASETS, DatasetKey, PARAM_LABEL, COLOR_BY_CODE, computeThresholds, legendTicks } from '@/lib/datasets';
+import { DATASETS, DatasetKey, PARAM_LABEL, COLOR_BY_CODE, computeThresholds, legendTicks, discreteLegendForCode } from '@/lib/datasets';
 
 
 interface RiverGaugeMapProps {
@@ -438,46 +438,66 @@ const th: Record<string, any> = t
                 <div>
                   <div className="text-sm font-semibold mb-2">Legend</div>
                   <div className="text-sm mb-1">{PARAM_LABEL[DATASETS[selectedDataset][0]] || selectedDataset}</div>
-                  {(() => {
-                    const code = DATASETS[selectedDataset][0];
-                    if (code === '00065') {
-                      const colors = (COLOR_BY_CODE['00065']?.colors as any) || {};
-                      return (
-                        <div className="w-48">
-                          <div className="grid grid-cols-2 gap-1 items-center">
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.low }} />
-                              <span className="text-xs">Low</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.med }} />
-                              <span className="text-xs">Med</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.high }} />
-                              <span className="text-xs">High</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.extreme || colors.high }} />
-                              <span className="text-xs">Extreme</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }
-                    const colors = COLOR_BY_CODE[code]?.colors || { low:'#d4f0ff', med:'#4a90e2', high:'#08306b' };
-                    const gradient = `linear-gradient(to right, ${colors.low}, ${colors.med}, ${colors.high})`;
-                    const t = thresholds[code];
-                    const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
-                    return (
-                      <>
-                        <div className="h-2 rounded w-48" style={{ background: gradient }} />
-                        {t ? (
-                          <div className="mt-1 text-xs text-muted-foreground">{legendTicks({ min:t.min, q33:t.q33, q66:t.q66, max:t.max }, unit)}</div>
-                        ) : null}
-                      </>
-                    );
-                  })()}
+{(() => {
+  const code = DATASETS[selectedDataset][0];
+  if (code === '00065') {
+    const colors = (COLOR_BY_CODE['00065']?.colors as any) || {};
+    return (
+      <div className="w-48">
+        <div className="grid grid-cols-2 gap-1 items-center">
+          <div className="flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.low }} />
+            <span className="text-xs">Low</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.med }} />
+            <span className="text-xs">Med</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.high }} />
+            <span className="text-xs">High</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.extreme || colors.high }} />
+            <span className="text-xs">Extreme</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // Discrete bins (e.g., pH)
+  const bins = discreteLegendForCode(code);
+  if (bins) {
+    return (
+      <div className="w-48 space-y-1">
+        <div className="grid grid-cols-1 gap-1">
+          {bins.map((b, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: b.color }} />
+              <span className="text-xs">{b.label}</span>
+            </div>
+          ))}
+        </div>
+        {code === '00400' && (
+          <div className="text-[10px] text-muted-foreground">EPA recommended range 6.5–8.5</div>
+        )}
+      </div>
+    );
+  }
+  const colors = COLOR_BY_CODE[code]?.colors || { low:'#d4f0ff', med:'#4a90e2', high:'#08306b' };
+  const gradient = `linear-gradient(to right, ${colors.low}, ${colors.med}, ${colors.high})`;
+  const t = thresholds[code];
+  const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
+  return (
+    <>
+      <div className="h-2 rounded w-48" style={{ background: gradient }} />
+      {t ? (
+        <div className="mt-1 text-xs text-muted-foreground">{legendTicks({ min:t.min, q33:t.q33, q66:t.q66, max:t.max }, unit)}</div>
+      ) : null}
+    </>
+  );
+})()}
+
                 
                 </div>
 
@@ -542,6 +562,25 @@ const th: Record<string, any> = t
                           <span className="text-xs">Extreme</span>
                         </div>
                       </div>
+                    </div>
+                  );
+                }
+                // Discrete bins (e.g., pH)
+                const bins = discreteLegendForCode(code);
+                if (bins) {
+                  return (
+                    <div className="w-48 space-y-1">
+                      <div className="grid grid-cols-1 gap-1">
+                        {bins.map((b, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: b.color }} />
+                            <span className="text-xs">{b.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {code === '00400' && (
+                        <div className="text-[10px] text-muted-foreground">EPA recommended range 6.5–8.5</div>
+                      )}
                     </div>
                   );
                 }
