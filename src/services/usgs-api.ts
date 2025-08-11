@@ -931,48 +931,58 @@ export class USGSService {
     const cached = this.getCached<{ t:number; v:number }[]>(cacheKey);
     if (cached) return cached;
     const ids = this.normalizeIds(siteId);
-    for (const id of ids) {
+
+    const parseSeries = (feats: any[], code: string) =>
+      feats
+        .map((f: any) => {
+          const pr = f?.properties || {};
+          const ts = pr.time || pr.result_time || pr.datetime;
+          const val = pr.value ?? pr.result;
+          const codeProp = pr.parameter_code || pr.observed_property_code;
+          return codeProp === code ? { t: Date.parse(ts), v: Number(val) } : { t: NaN, v: NaN };
+        })
+        .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
+        .sort((a, b) => a.t - b.t);
+
+    const tryFetch = async (collection: 'instantaneous-values'|'observations', id: string, startParam: 'start'|'startDt', endParam: 'end'|'endDt') => {
+      const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, [startParam]: start.toISOString(), [endParam]: end.toISOString(), limit: '20000' } as any);
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/${collection}/items?${params.toString()}`));
+      console.log(`[USGS] ${collection} fetch`, { id, code, start: start.toISOString(), end: end.toISOString(), startParam, endParam });
       try {
-        const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, start: start.toISOString(), end: end.toISOString(), limit: '20000' });
-        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/instantaneous-values/items?${p.toString()}`));
-        console.log('[USGS] obs fetch', { id, code, start: start.toISOString(), end: end.toISOString() });
         const feats = await this.fetchPaged(url.toString(), signal);
-        let series = feats
-          .map((f: any) => {
-            const pr = f?.properties || {};
-            const ts = pr.time || pr.result_time || pr.datetime;
-            const val = pr.value ?? pr.result;
-            const codeProp = pr.parameter_code || pr.observed_property_code;
-            return codeProp === code ? { t: Date.parse(ts), v: Number(val) } : { t: NaN, v: NaN };
-          })
-          .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
-          .sort((a, b) => a.t - b.t);
+        let series = parseSeries(feats, code);
         if (series.length === 0) {
-          // Fallback: fetch without parameter filter and filter client-side
-          const p2 = new URLSearchParams({ f: 'json', monitoring_location_id: id, start: start.toISOString(), end: end.toISOString(), limit: '20000' });
-          const url2 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/instantaneous-values/items?${p2.toString()}`));
-          console.log('[USGS] obs fallback (no param_code)', { id });
+          // Fallback: drop parameter filter and filter client-side
+          const params2 = new URLSearchParams({ f: 'json', monitoring_location_id: id, [startParam]: start.toISOString(), [endParam]: end.toISOString(), limit: '20000' } as any);
+          const url2 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/${collection}/items?${params2.toString()}`));
+          console.log(`[USGS] ${collection} fallback (no param_code)`, { id });
           const feats2 = await this.fetchPaged(url2.toString(), signal);
-          series = feats2
-            .map((f: any) => {
-              const pr = f?.properties || {};
-              const ts = pr.time || pr.result_time || pr.datetime;
-              const val = pr.value ?? pr.result;
-              const codeProp = pr.parameter_code || pr.observed_property_code;
-              return codeProp === code ? { t: Date.parse(ts), v: Number(val) } : { t: NaN, v: NaN };
-            })
-            .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
-            .sort((a, b) => a.t - b.t);
-          console.log('[USGS] obs fallback points', series.length);
+          series = parseSeries(feats2, code);
         }
-        console.log('[USGS] obs points', series.length);
+        console.log(`[USGS] ${collection} points`, series.length);
+        return series;
+      } catch (e: any) {
+        if (e?.name === 'AbortError') throw e;
+        return [] as { t:number; v:number }[];
+      }
+    };
+
+    for (const id of ids) {
+      // Try multiple compatible API shapes in order
+      const attempts: Array<Promise<{ t:number; v:number }[]>> = [
+        tryFetch('instantaneous-values', id, 'start', 'end'),
+        tryFetch('instantaneous-values', id, 'startDt', 'endDt'),
+        tryFetch('observations', id, 'start', 'end'),
+        tryFetch('observations', id, 'startDt', 'endDt'),
+      ];
+      // Run in sequence until we find non-empty to avoid wasted bandwidth; keep sequential to respect API
+      for (const p of attempts) {
+        const series = await p;
+        if (signal?.aborted) return [];
         if (series.length > 0) {
           this.setCache(cacheKey, series);
           return series;
         }
-      } catch (e: any) {
-        if (e?.name === 'AbortError') throw e;
-        // try next id variant
       }
     }
     return [];
@@ -983,26 +993,47 @@ export class USGSService {
     const cached = this.getCached<{ t:number; v:number }[]>(cacheKey);
     if (cached) return cached;
     const ids = this.normalizeIds(siteId);
-    for (const id of ids) {
+
+    const parseSeries = (feats: any[]) =>
+      feats
+        .map((f: any) => {
+          const pr = f?.properties || {};
+          const ts = pr.time || pr.datetime || pr.result_time;
+          const val = pr.value ?? pr.result;
+          return { t: Date.parse(ts), v: Number(val) };
+        })
+        .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
+        .sort((a, b) => a.t - b.t);
+
+    const tryFetch = async (collection: 'daily-values'|'daily', id: string, startParam: 'start'|'startDt', endParam: 'end'|'endDt') => {
+      const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', [startParam]: start.toISOString(), [endParam]: end.toISOString(), limit: '20000' } as any);
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/${collection}/items?${params.toString()}`));
+      console.log(`[USGS] ${collection} fetch`, { id, code, start: start.toISOString(), end: end.toISOString(), startParam, endParam });
       try {
-         const p = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', start: start.toISOString(), end: end.toISOString(), limit: '20000' });
-         const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items?${p.toString()}`));
-        console.log('[USGS] daily fetch', { id, code, start: start.toISOString(), end: end.toISOString() });
         const feats = await this.fetchPaged(url.toString(), signal);
-        const series = feats
-          .map((f: any) => {
-            const pr = f?.properties || {};
-            const ts = pr.time || pr.datetime || pr.result_time;
-            return { t: Date.parse(ts), v: Number(pr.value) };
-          })
-          .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
-          .sort((a, b) => a.t - b.t);
+        const series = parseSeries(feats);
+        console.log(`[USGS] ${collection} points`, series.length);
+        return series;
+      } catch (e: any) {
+        if (e?.name === 'AbortError') throw e;
+        return [] as { t:number; v:number }[];
+      }
+    };
+
+    for (const id of ids) {
+      const attempts: Array<Promise<{ t:number; v:number }[]>> = [
+        tryFetch('daily-values', id, 'start', 'end'),
+        tryFetch('daily-values', id, 'startDt', 'endDt'),
+        tryFetch('daily', id, 'start', 'end'),
+        tryFetch('daily', id, 'startDt', 'endDt'),
+      ];
+      for (const p of attempts) {
+        const series = await p;
+        if (signal?.aborted) return [];
         if (series.length > 0) {
           this.setCache(cacheKey, series);
           return series;
         }
-      } catch (e: any) {
-        if (e?.name === 'AbortError') throw e;
       }
     }
     return [];
