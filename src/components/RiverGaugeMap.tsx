@@ -385,6 +385,15 @@ const th: Record<string, any> = t
       {/* Map Container */}
       <MapContainer />
 
+      {/* Loading overlay to prevent white screen */}
+      {!isLoaded && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="rounded-md bg-background/80 backdrop-blur-sm px-3 py-2 text-sm">
+            Loading map…
+          </div>
+        </div>
+      )}
+
       {/* Markers */}
       {basicGaugeLocations.length > 0 && (
         <GaugeMarkers
