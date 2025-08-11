@@ -169,9 +169,14 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, haz
   useEffect(() => {
     if (!map) return;
 
-    const nextIds = new Set(basicLocations.map(l => l.siteId));
+    // Only include sites that have a value for the currently active parameter
+    const filtered = basicLocations.filter((l) =>
+      (l.params || []).some((p) => p.code === activeCode && Number.isFinite(p.value))
+    );
 
-    // Remove markers not in view
+    const nextIds = new Set(filtered.map((l) => l.siteId));
+
+    // Remove markers not in the filtered set
     markerMapRef.current.forEach((marker, id) => {
       if (!nextIds.has(id)) {
         marker.setMap(null);
@@ -179,8 +184,8 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, haz
       }
     });
 
-    // Upsert
-    basicLocations.forEach((loc) => {
+    // Upsert only the filtered locations
+    filtered.forEach((loc) => {
       let marker = markerMapRef.current.get(loc.siteId);
       const [lng, lat] = loc.coordinates;
       const color = siteColor(loc);
@@ -207,7 +212,7 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, haz
     return () => {
       // no-op here; full cleanup on unmount
     };
-  }, [map, basicLocations, createMarker, activeCodes, thresholds, hazardBySite]);
+  }, [map, basicLocations, createMarker, activeCodes, thresholds, hazardBySite, activeCode]);
 
   // Cleanup on unmount
   useEffect(() => clearMarkers, [clearMarkers]);
