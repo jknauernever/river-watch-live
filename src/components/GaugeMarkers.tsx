@@ -116,39 +116,44 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, haz
         root = null;
       });
 
+      // Render immediately using known params, then hydrate with full data when ready
+      const initialLatest = (location.params || []).map((p) => ({
+        properties: {
+          parameter_code: p.code,
+          parameter_name: p.label,
+          unit: p.unit,
+          value: p.value,
+          time: p.time,
+        }
+      }));
+      root = createRoot(container);
+      root.render(
+        React.createElement(SitePopup, {
+          site: { siteId: location.siteId, name: location.name, coordinates: location.coordinates, siteType: location.siteType },
+          attributes: null,
+          latestFeatures: initialLatest,
+          activeCode,
+          thresholds: (thresholds?.[activeCode] as any) || null,
+          hazard: hazardBySite?.[location.siteId],
+        })
+      );
+
+      // Fetch in background and update when available
       try {
         const { attributes, latest } = await usgsService.getGaugeFullInfo(location.siteId);
-        // Render React popup
-        root = createRoot(container);
+        if (!root) return; // closed
         root.render(
           React.createElement(SitePopup, {
             site: { siteId: location.siteId, name: location.name, coordinates: location.coordinates, siteType: location.siteType },
             attributes: attributes || null,
-            latestFeatures: latest || [],
+            latestFeatures: latest && latest.length > 0 ? latest : initialLatest,
             activeCode,
             thresholds: (thresholds?.[activeCode] as any) || null,
             hazard: hazardBySite?.[location.siteId],
-            onCenter: () => {
-              map?.panTo({ lat: location.coordinates[1], lng: location.coordinates[0] });
-              if (map?.getZoom && (map.getZoom() ?? 0) < 12) map.setZoom(12);
-            }
           })
         );
       } catch (e) {
-        while (container.firstChild) container.removeChild(container.firstChild);
-        {
-          const wrapper = document.createElement('div');
-          wrapper.className = 'p-3 max-w-sm';
-          const title = document.createElement('div');
-          title.className = 'font-semibold mb-1';
-          title.textContent = location.name;
-          const msg = document.createElement('div');
-          msg.className = 'text-sm text-destructive';
-          msg.textContent = 'Failed to load data.';
-          wrapper.appendChild(title);
-          wrapper.appendChild(msg);
-          container.appendChild(wrapper);
-        }
+        // keep initial render; optionally we could show error state
       }
     });
 
