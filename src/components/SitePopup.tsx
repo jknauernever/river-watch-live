@@ -5,6 +5,7 @@ import { aggregateMonthly, downsampleEven, formatTimestamp, formatValueWithUnit,
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
 import { ExternalLink } from 'lucide-react';
+import usgsLogo from '@/assets/usgs-logo.svg';
 
 interface SitePopupProps {
   site: { siteId: string; name: string; coordinates: [number, number]; siteType?: string };
@@ -161,12 +162,23 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
             {site.coordinates[1].toFixed(4)}, {site.coordinates[0].toFixed(4)} · {site.siteType || 'Site'}
           </div>
         </div>
-        <button
-          onClick={() => navigator.clipboard.writeText(site.siteId)}
-          className="text-xs px-2 py-1 rounded-full border bg-background hover:bg-accent"
-          aria-label="Copy site ID"
-          title="Copy ID"
-        >{site.siteId}</button>
+        <div className="flex items-center gap-2">
+          <a
+            href={`https://waterdata.usgs.gov/monitoring-location/${site.siteId.replace(/^USGS[:\-]?/i,'')}`}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open monitoring location on USGS"
+            title="Open on USGS"
+          >
+            <img src={usgsLogo} alt="USGS logo — opens monitoring location" className="h-4 w-auto opacity-80 hover:opacity-100" loading="lazy" />
+          </a>
+          <button
+            onClick={() => navigator.clipboard.writeText(site.siteId)}
+            className="text-xs px-2 py-1 rounded-full border bg-background hover:bg-accent"
+            aria-label="Copy site ID"
+            title="Copy ID"
+          >{site.siteId}</button>
+        </div>
       </div>
 
       {/* Measurements */}
@@ -306,16 +318,7 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
         )}
       </div>
 
-      {/* Actions */}
-      <div className="mt-3 flex items-center gap-2">
-        <a
-          className="text-xs px-2 py-1 rounded border hover:bg-accent"
-          href={`https://waterdata.usgs.gov/monitoring-location/${site.siteId.replace(/^USGS[:\-]?/i,'')}`}
-          target="_blank" rel="noreferrer" aria-label="View on USGS"
-        >View on USGS</a>
-        <button className="text-xs px-2 py-1 rounded border hover:bg-accent" onClick={onCenter} aria-label="Center map here">Center here</button>
-        <button className="text-xs px-2 py-1 rounded border hover:bg-accent" onClick={() => navigator.clipboard.writeText(site.siteId)} aria-label="Copy site ID">Copy ID</button>
-      </div>
+      {/* Actions removed as per request */}
 
       {/* More details (raw attributes) */}
       {attributes && (
