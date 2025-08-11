@@ -259,8 +259,8 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
           <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
             {facts.map((f, i) => (
               <div key={i} className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground truncate">{f.label}</span>
-                <span className="font-medium truncate">{f.value}</span>
+                <span className="text-muted-foreground truncate" title={f.label}>{f.label}</span>
+                <span className="font-medium truncate" title={f.value}>{f.value}</span>
               </div>
             ))}
           </div>
@@ -332,8 +332,8 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
                   .slice(0, 200)
                   .map(([k, v]) => (
                     <div key={k} className="flex items-center justify-between gap-3">
-                      <span className="text-muted-foreground truncate">{k}</span>
-                      <span className="font-mono truncate">{String(v)}</span>
+                      <span className="text-muted-foreground truncate" title={String(k)}>{k}</span>
+                      <span className="font-mono truncate" title={String(v)}>{String(v)}</span>
                     </div>
                   ))}
               </div>
