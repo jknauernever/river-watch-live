@@ -210,8 +210,52 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
       {/* Legend */}
       <div className="mt-3">
         <div className="text-xs font-medium mb-1">Legend</div>
-        <div className="h-2 rounded" style={{ background: gradientCssForCode(activeCode) }} />
-        <div className="text-[10px] text-muted-foreground mt-1">{legendTicks(thresholds, activeUnit)}</div>
+        {activeCode === '00065' ? (
+          <>
+            <div className="grid grid-cols-4 gap-2 items-center">
+              <div className="flex items-center gap-1">
+                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: COLOR_BY_CODE['00065']?.colors.low }} />
+                <span className="text-xs">Low</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: COLOR_BY_CODE['00065']?.colors.med }} />
+                <span className="text-xs">Med</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: COLOR_BY_CODE['00065']?.colors.high }} />
+                <span className="text-xs">High</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: (COLOR_BY_CODE['00065']?.colors as any)?.extreme || COLOR_BY_CODE['00065']?.colors.high }} />
+                <span className="text-xs">Extreme</span>
+              </div>
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-1">
+              {(() => {
+                const u = activeUnit ? ` ${activeUnit}` : '';
+                if (hazard && typeof hazard.medThreshold === 'number' && typeof hazard.highThreshold === 'number' && typeof hazard.extremeThreshold === 'number') {
+                  return `Med ≥ ${hazard.medThreshold.toFixed(2)}${u} · High ≥ ${hazard.highThreshold.toFixed(2)}${u} · Extreme ≥ ${hazard.extremeThreshold.toFixed(2)}${u}`;
+                }
+                if (thresholds) {
+                  const q33 = (thresholds as any).q33 as number | undefined;
+                  const q66 = (thresholds as any).q66 as number | undefined;
+                  const q90 = (thresholds as any).q90 as number | undefined;
+                  const parts: string[] = [];
+                  if (typeof q33 === 'number') parts.push(`Med ≥ ${q33.toFixed(2)}${u}`);
+                  if (typeof q66 === 'number') parts.push(`High ≥ ${q66.toFixed(2)}${u}`);
+                  if (typeof q90 === 'number') parts.push(`Extreme ≥ ${q90.toFixed(2)}${u}`);
+                  return parts.join(' · ');
+                }
+                return '';
+              })()}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="h-2 rounded" style={{ background: gradientCssForCode(activeCode) }} />
+            <div className="text-[10px] text-muted-foreground mt-1">{legendTicks(thresholds, activeUnit)}</div>
+          </>
+        )}
       </div>
 
       {/* Actions */}
