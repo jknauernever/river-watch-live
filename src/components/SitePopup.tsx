@@ -3,6 +3,8 @@ import { COLOR_BY_CODE, PARAM_LABEL, legendTicks, Thresholds } from '@/lib/datas
 import { usgsService } from '@/services/usgs-api';
 import { aggregateMonthly, downsampleEven, formatTimestamp, formatValueWithUnit, gradientCssForCode, pickUnit, TV } from '@/lib/popup-utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Button } from '@/components/ui/button';
+import { ExternalLink } from 'lucide-react';
 
 interface SitePopupProps {
   site: { siteId: string; name: string; coordinates: [number, number]; siteType?: string };
@@ -311,11 +313,6 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
           href={`https://waterdata.usgs.gov/monitoring-location/${site.siteId.replace(/^USGS[:\-]?/i,'')}`}
           target="_blank" rel="noreferrer" aria-label="View on USGS"
         >View on USGS</a>
-        <a
-          className="text-xs px-2 py-1 rounded border hover:bg-accent"
-          href={`/site?siteId=${encodeURIComponent(site.siteId)}&name=${encodeURIComponent(site.name)}&lat=${site.coordinates[1]}&lng=${site.coordinates[0]}&code=${activeCode}`}
-          target="_blank" rel="noreferrer" aria-label="Open details"
-        >Open details</a>
         <button className="text-xs px-2 py-1 rounded border hover:bg-accent" onClick={onCenter} aria-label="Center map here">Center here</button>
         <button className="text-xs px-2 py-1 rounded border hover:bg-accent" onClick={() => navigator.clipboard.writeText(site.siteId)} aria-label="Copy site ID">Copy ID</button>
       </div>
@@ -344,9 +341,20 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
 
       {/* Mini chart */}
       <div className="mt-3">
-        <div className="inline-flex items-center rounded border overflow-hidden text-xs" role="tablist" aria-label="History range">
-          <button className={`px-2 py-1 ${mode==='14d'?'bg-accent':''}`} onClick={()=>setMode('14d')} role="tab" aria-selected={mode==='14d'}>14 days</button>
-          <button className={`px-2 py-1 ${mode==='year'?'bg-accent':''}`} onClick={()=>setMode('year')} role="tab" aria-selected={mode==='year'}>Past year</button>
+        <div className="flex items-center justify-between">
+          <div className="inline-flex items-center rounded border overflow-hidden text-xs" role="tablist" aria-label="History range">
+            <button className={`px-2 py-1 ${mode==='14d'?'bg-accent':''}`} onClick={()=>setMode('14d')} role="tab" aria-selected={mode==='14d'}>14 days</button>
+            <button className={`px-2 py-1 ${mode==='year'?'bg-accent':''}`} onClick={()=>setMode('year')} role="tab" aria-selected={mode==='year'}>Past year</button>
+          </div>
+          <a
+            href={`/site?siteId=${encodeURIComponent(site.siteId)}&name=${encodeURIComponent(site.name)}&lat=${site.coordinates[1]}&lng=${site.coordinates[0]}&code=${activeCode}`}
+            target="_blank" rel="noreferrer" aria-label="Open details" title="Open in new tab"
+            className="ml-2"
+          >
+            <Button variant="ghost" size="icon" className="h-6 w-6">
+              <ExternalLink className="w-4 h-4" />
+            </Button>
+          </a>
         </div>
         <div className="mt-2">
           {loading && <div className="text-xs text-muted-foreground">Loading chart…</div>}
