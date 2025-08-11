@@ -930,61 +930,69 @@ export class USGSService {
     const cacheKey = `obs-${siteId}-${code}-${start.toISOString()}-${end.toISOString()}`;
     const cached = this.getCached<{ t:number; v:number }[]>(cacheKey);
     if (cached) return cached;
-    const ids = this.normalizeIds(siteId);
 
-    const parseSeries = (feats: any[], code: string) =>
-      feats
-        .map((f: any) => {
-          const pr = f?.properties || {};
-          const ts = pr.time || pr.result_time || pr.datetime;
-          const val = pr.value ?? pr.result;
-          const codeProp = pr.parameter_code || pr.observed_property_code;
-          return codeProp === code ? { t: Date.parse(ts), v: Number(val) } : { t: NaN, v: NaN };
-        })
-        .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
-        .sort((a, b) => a.t - b.t);
-
-    const tryFetch = async (collection: 'instantaneous-values'|'observations', id: string, startParam: 'start'|'startDt', endParam: 'end'|'endDt') => {
-      const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, [startParam]: start.toISOString(), [endParam]: end.toISOString(), limit: '20000' } as any);
-      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/${collection}/items?${params.toString()}`));
-      console.log(`[USGS] ${collection} fetch`, { id, code, start: start.toISOString(), end: end.toISOString(), startParam, endParam });
-      try {
-        const feats = await this.fetchPaged(url.toString(), signal);
-        let series = parseSeries(feats, code);
-        if (series.length === 0) {
-          // Fallback: drop parameter filter and filter client-side
-          const params2 = new URLSearchParams({ f: 'json', monitoring_location_id: id, [startParam]: start.toISOString(), [endParam]: end.toISOString(), limit: '20000' } as any);
-          const url2 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/${collection}/items?${params2.toString()}`));
-          console.log(`[USGS] ${collection} fallback (no param_code)`, { id });
-          const feats2 = await this.fetchPaged(url2.toString(), signal);
-          series = parseSeries(feats2, code);
-        }
-        console.log(`[USGS] ${collection} points`, series.length);
-        return series;
-      } catch (e: any) {
-        if (e?.name === 'AbortError') throw e;
-        return [] as { t:number; v:number }[];
-      }
+    // Use legacy Water Services for sub-daily instantaneous values (IV)
+    const numeric = siteId.replace(/^USGS[:\-]?/i, '');
+    const buildIvUrl = (params: Record<string,string>) => {
+      const u = new URL('https://waterservices.usgs.gov/nwis/iv/');
+      Object.entries({ format: 'json', sites: numeric, parameterCd: code, ...params }).forEach(([k,v]) => u.searchParams.set(k, v));
+      return u;
     };
 
-    for (const id of ids) {
-      // Try multiple compatible API shapes in order
-      const attempts: Array<Promise<{ t:number; v:number }[]>> = [
-        tryFetch('instantaneous-values', id, 'start', 'end'),
-        tryFetch('instantaneous-values', id, 'startDt', 'endDt'),
-        tryFetch('observations', id, 'start', 'end'),
-        tryFetch('observations', id, 'startDt', 'endDt'),
-      ];
-      // Run in sequence until we find non-empty to avoid wasted bandwidth; keep sequential to respect API
-      for (const p of attempts) {
-        const series = await p;
-        if (signal?.aborted) return [];
-        if (series.length > 0) {
-          this.setCache(cacheKey, series);
-          return series;
+    const parseIvJson = (j: any) => {
+      const tsArr = j?.value?.timeSeries || [];
+      const points: { t:number; v:number }[] = [];
+      for (const ts of tsArr) {
+        const varCode = ts?.variable?.variableCode?.[0]?.value;
+        if (varCode !== code) continue;
+        const vals = ts?.values || [];
+        for (const block of vals) {
+          const arr = block?.value || [];
+          for (const it of arr) {
+            const t = Date.parse(it?.dateTime);
+            const v = Number(it?.value);
+            if (Number.isFinite(t) && Number.isFinite(v)) points.push({ t, v });
+          }
         }
       }
+      points.sort((a,b)=>a.t-b.t);
+      return points;
+    };
+
+    try {
+      // Primary: bounded by startDT/endDT
+      const url = buildIvUrl({ startDT: start.toISOString(), endDT: end.toISOString() });
+      console.info('[USGS] iv fetch', { siteId, numeric, code, start: start.toISOString(), end: end.toISOString() });
+      const resp = await fetch(url.toString(), { signal, headers: { Accept: 'application/json' } });
+      if (resp.ok) {
+        const j = await resp.json();
+        const pts = parseIvJson(j);
+        console.info('[USGS] iv points', pts.length);
+        if (pts.length > 0) { this.setCache(cacheKey, pts); return pts; }
+      }
+    } catch (e:any) {
+      if (e?.name === 'AbortError') throw e;
+      console.warn('IV fetch failed, will try period fallback', e);
     }
+
+    // Simple fallback using period duration if bounded query was empty
+    try {
+      const days = Math.max(1, Math.floor((end.getTime() - start.getTime()) / 86400000));
+      const period = `P${days}D`;
+      const url2 = buildIvUrl({ period });
+      console.info('[USGS] iv fallback fetch', { siteId, numeric, code, period });
+      const resp2 = await fetch(url2.toString(), { signal, headers: { Accept: 'application/json' } });
+      if (resp2.ok) {
+        const j2 = await resp2.json();
+        const pts2 = parseIvJson(j2);
+        console.info('[USGS] iv fallback points', pts2.length);
+        if (pts2.length > 0) { this.setCache(cacheKey, pts2); return pts2; }
+      }
+    } catch (e:any) {
+      if (e?.name === 'AbortError') throw e;
+      console.warn('IV period fallback failed', e);
+    }
+
     return [];
   }
 
@@ -992,8 +1000,8 @@ export class USGSService {
     const cacheKey = `daily-${siteId}-${code}-${start.toISOString()}-${end.toISOString()}`;
     const cached = this.getCached<{ t:number; v:number }[]>(cacheKey);
     if (cached) return cached;
-    const ids = this.normalizeIds(siteId);
 
+    const ids = this.normalizeIds(siteId);
     const parseSeries = (feats: any[]) =>
       feats
         .map((f: any) => {
@@ -1005,37 +1013,51 @@ export class USGSService {
         .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
         .sort((a, b) => a.t - b.t);
 
-    const tryFetch = async (collection: 'daily-values'|'daily', id: string, startParam: 'start'|'startDt', endParam: 'end'|'endDt') => {
-      const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', [startParam]: start.toISOString(), [endParam]: end.toISOString(), limit: '20000' } as any);
-      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/${collection}/items?${params.toString()}`));
-      console.log(`[USGS] ${collection} fetch`, { id, code, start: start.toISOString(), end: end.toISOString(), startParam, endParam });
+    const tryDailyDatetime = async (id: string) => {
+      const dt = `${start.toISOString()}/${end.toISOString()}`;
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily/items`));
+      url.searchParams.set('monitoring_location_id', id);
+      url.searchParams.set('parameter_code', code);
+      url.searchParams.set('statistic_id', '00003');
+      url.searchParams.set('datetime', dt);
+      url.searchParams.set('limit', '20000');
+      url.searchParams.set('f', 'json');
+      console.log('[USGS] daily fetch', { id, code, datetime: dt });
       try {
         const feats = await this.fetchPaged(url.toString(), signal);
-        const series = parseSeries(feats);
-        console.log(`[USGS] ${collection} points`, series.length);
-        return series;
-      } catch (e: any) {
+        return parseSeries(feats);
+      } catch (e:any) {
         if (e?.name === 'AbortError') throw e;
         return [] as { t:number; v:number }[];
       }
     };
 
     for (const id of ids) {
+      // Prefer modern daily endpoint with datetime
+      const series = await tryDailyDatetime(id);
+      if (signal?.aborted) return [];
+      if (series.length > 0) { this.setCache(cacheKey, series); return series; }
+
+      // Fallbacks for older shapes
       const attempts: Array<Promise<{ t:number; v:number }[]>> = [
-        tryFetch('daily-values', id, 'start', 'end'),
-        tryFetch('daily-values', id, 'startDt', 'endDt'),
-        tryFetch('daily', id, 'start', 'end'),
-        tryFetch('daily', id, 'startDt', 'endDt'),
+        (async () => {
+          const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', start: start.toISOString(), end: end.toISOString(), limit: '20000' } as any);
+          const u = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily/items?${params.toString()}`));
+          try { return parseSeries(await this.fetchPaged(u.toString(), signal)); } catch { return []; }
+        })(),
+        (async () => {
+          const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' } as any);
+          const u = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily/items?${params.toString()}`));
+          try { return parseSeries(await this.fetchPaged(u.toString(), signal)); } catch { return []; }
+        })(),
       ];
       for (const p of attempts) {
-        const series = await p;
+        const s = await p;
         if (signal?.aborted) return [];
-        if (series.length > 0) {
-          this.setCache(cacheKey, series);
-          return series;
-        }
+        if (s.length > 0) { this.setCache(cacheKey, s); return s; }
       }
     }
+
     return [];
   }
 
