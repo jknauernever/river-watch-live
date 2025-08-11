@@ -30,9 +30,10 @@ export const PARAM_LABEL: Record<string,string> = {
 
 // ===== Color scales per parameter code =====
 // type: sequential or diverging (for UI hints only)
-export const COLOR_BY_CODE: Record<string, {type:'sequential'|'diverging', colors:{low:string, med:string, high:string}}> = {
-  // 00065 — Gage height (blue scale)
-  '00065': { type: 'sequential', colors: { low:'#d4f0ff', med:'#4a90e2', high:'#08306b' }},
+// type: sequential, diverging, or hazard
+export const COLOR_BY_CODE: Record<string, {type:'sequential'|'diverging'|'hazard', colors:{low:string, med:string, high:string, extreme?:string}}> = {
+  // 00065 — Gage height (hazard scale)
+  '00065': { type: 'hazard', colors: { low: '#2ca25f', med: '#ffcc00', high: '#e31a1c', extreme: '#6a3d9a' }},
 
   // 00060 — Discharge (aqua → deep teal)
   '00060': { type: 'sequential', colors: { low:'#d0f0e0', med:'#4ab0a6', high:'#004d47' }},
@@ -66,7 +67,7 @@ export const PARAM_UNIT: Record<string, string> = {
 };
 
 // ===== Quantiles + color mapping =====
-export type Thresholds = { min:number; q33:number; q66:number; max:number };
+export type Thresholds = { min:number; q33:number; q66:number; q90?:number; max:number };
 
 export function computeThresholds(values: number[]): Thresholds | null {
   const arr = values.filter(v => Number.isFinite(v)).sort((a,b)=>a-b);
@@ -76,14 +77,28 @@ export function computeThresholds(values: number[]): Thresholds | null {
     const lo = Math.floor(pos), hi = Math.ceil(pos);
     return lo === hi ? arr[lo] : arr[lo] + (arr[hi]-arr[lo])*(pos-lo);
   };
-  return { min: arr[0], q33: q(0.33), q66: q(0.66), max: arr[arr.length-1] };
+  return { min: arr[0], q33: q(0.33), q66: q(0.66), q90: q(0.90), max: arr[arr.length-1] };
 }
 
-export function colorForValue(paramCode: string, value: number, th: Thresholds | null): string {
-  const scale = COLOR_BY_CODE[paramCode]?.colors;
+export function colorForValue(paramCode: string, value: number, th: Thresholds | (Thresholds & { q90?: number; extremeThreshold?: number; medThreshold?: number; highThreshold?: number }) | null): string {
+  const config = COLOR_BY_CODE[paramCode];
+  const scale = config?.colors as any;
   if (!scale || !Number.isFinite(value) || !th) return '#4a90e2'; // fallback
-  if (value <= th.q33) return scale.low;
-  if (value >= th.q66) return scale.high;
+
+  // Special hazard logic for gage height (00065)
+  if (paramCode === '00065') {
+    const medT = (th as any).medThreshold ?? (th as any).q33;
+    const highT = (th as any).highThreshold ?? (th as any).q66;
+    const extremeT = (th as any).extremeThreshold ?? (th as any).q90 ?? (th as any).q66;
+    if (Number.isFinite(extremeT) && value >= extremeT) return scale.extreme || scale.high;
+    if (Number.isFinite(highT) && value >= highT) return scale.high;
+    if (Number.isFinite(medT) && value >= medT) return scale.med;
+    return scale.low;
+  }
+
+  // Default 3-bin logic
+  if (value <= (th as any).q33) return scale.low;
+  if (value >= (th as any).q66) return scale.high;
   return scale.med;
 }
 

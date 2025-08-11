@@ -37,7 +37,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   
   // Parameter filtering and thresholds
   const [activeCodes, setActiveCodes] = useState<string[]>(['00060','00065']);
-  const [thresholds, setThresholds] = useState<Record<string, { q33:number; q66:number; min:number; max:number }>>({});
+  const [thresholds, setThresholds] = useState<Record<string, any>>({});
   const [availableCodes, setAvailableCodes] = useState<Set<string>>(new Set());
   const [unitsByCode, setUnitsByCode] = useState<Record<string, string | undefined>>({});
   const availabilityTimerRef = useRef<number | null>(null);
