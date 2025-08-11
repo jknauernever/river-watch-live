@@ -32,10 +32,23 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
       const code: string | undefined = p.parameter_code || p.observed_property_code;
       if (!code) continue;
       const label: string = p.parameter_name || p.observed_property_name || PARAM_LABEL[code] || code;
-      const unit: string | undefined = p.unit || p.unit_of_measurement || p.unit_of_measure || undefined;
+      let unit: string | undefined = p.unit || p.unit_of_measurement || p.unit_of_measure || undefined;
       const time: string | undefined = p.time || p.datetime || p.result_time || undefined;
       const valueNum = Number(p.value ?? p.result);
-      const value = Number.isFinite(valueNum) ? valueNum : undefined;
+      let value = Number.isFinite(valueNum) ? valueNum : undefined;
+
+      // Normalize gage height to feet if unit indicates SI or is missing but value is suspiciously large
+      if (code === '00065' && typeof value === 'number') {
+        const u = (unit || '').toLowerCase();
+        if (u === 'm' || u === 'meter' || u === 'metre' || u === 'meters') { value = value * 3.28084; unit = 'ft'; }
+        else if (u === 'cm' || u === 'centimeter' || u === 'centimeters') { value = value / 30.48; unit = 'ft'; }
+        else if (u === 'mm' || u === 'millimeter' || u === 'millimeters') { value = value / 304.8; unit = 'ft'; }
+        else if (!u) {
+          // Heuristic: if no unit provided and value is extremely large for stage, assume centimeters
+          if (value > 200 && value < 20000) { value = value / 30.48; unit = 'ft'; }
+        }
+      }
+
       const ex = byCode.get(code);
       if (!ex) byCode.set(code, { code, label, unit, time, value });
     }
