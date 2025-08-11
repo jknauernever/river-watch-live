@@ -14,6 +14,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { DATASETS, DatasetKey, PARAM_LABEL, COLOR_BY_CODE, computeThresholds, legendTicks } from '@/lib/datasets';
+import { Switch } from '@/components/ui/switch';
 
 
 interface RiverGaugeMapProps {
@@ -29,11 +30,18 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [fetchProgress, setFetchProgress] = useState<{ fetched: number; total?: number } | null>(null);
   
   const [basicGaugeLocations, setBasicGaugeLocations] = useState<any[]>([]);
-  
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
   const [countUnavailable, setCountUnavailable] = useState(false);
   const [renderMode, setRenderMode] = useState<'loading' | 'blocked' | 'markers' | 'countUnavailable'>('loading');
+
+  // Diagnostics & proxy control
+  const [useProxy, setUseProxy] = useState<boolean>(() => {
+    try { const v = localStorage.getItem('use-usgs-proxy'); return v === null ? true : v !== 'false'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('use-usgs-proxy', useProxy ? 'true' : 'false'); } catch {}
+  }, [useProxy]);
   
   // Parameter filtering and thresholds
   const [activeCodes, setActiveCodes] = useState<string[]>(['00060','00065']);
@@ -496,9 +504,25 @@ const th: Record<string, any> = t
                     ? `${basicGaugeLocations.length} gauges in view`
                     : `No gauges with latest ${selectedDataset} in view.`}
                 </div>
+
+                {/* Proxy toggle */}
+                <div className="flex items-center justify-between pt-2">
+                  <span className="text-sm">Use proxy</span>
+                  <Switch checked={useProxy} onCheckedChange={(v) => { setUseProxy(v); loadGaugeLocations(); }} />
+                </div>
               </div>
             </SheetContent>
           </Sheet>
+        </div>
+
+        {/* Desktop: proxy toggle */}
+        <div className="ml-3 hidden md:flex items-center gap-2 pointer-events-auto">
+          <Card>
+            <CardContent className="py-2 px-3 flex items-center gap-2">
+              <span className="text-xs">Proxy</span>
+              <Switch checked={useProxy} onCheckedChange={(v) => { setUseProxy(v); loadGaugeLocations(); }} />
+            </CardContent>
+          </Card>
         </div>
       </div>
 

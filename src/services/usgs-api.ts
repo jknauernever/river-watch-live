@@ -14,15 +14,33 @@ function getUSGSApiKey(): string {
   }
 }
 
+function shouldUseProxy(): boolean {
+  try {
+    if (typeof window === 'undefined') return true;
+    const v = localStorage.getItem('use-usgs-proxy');
+    return v === null ? true : v !== 'false';
+  } catch {
+    return true;
+  }
+}
+
 function ensureProxyUrl(url: URL): URL {
-  // Route all USGS requests via our Supabase edge proxy to avoid exposing API keys client-side
+  // Prefer routing via Supabase edge proxy unless user disabled it
+  if (!shouldUseProxy()) {
+    // Optionally inject API key client-side only if provided (not required)
+    const key = getUSGSApiKey();
+    if (key && !url.searchParams.has('api_key')) {
+      url.searchParams.set('api_key', key);
+    }
+    return url;
+  }
   const proxied = new URL(`${FUNCTIONS_URL}/usgs-proxy`);
   proxied.searchParams.set('upstream', url.toString());
   return proxied;
 }
 
 function ensureApiKey(url: URL): URL {
-  // Backwards-compatible wrapper: we now return a proxied URL instead of appending api_key
+  // Backwards-compatible wrapper: now proxies unless disabled
   return ensureProxyUrl(url);
 }
 
@@ -34,6 +52,64 @@ function ensureApiKeyOnString(urlString: string | null): string | null {
   } catch {
     return urlString;
   }
+}
+
+async function fetchWithProxyFallback(urlString: string, init?: RequestInit): Promise<Response> {
+  // Try proxy first (default), then direct upstream; or the opposite if proxy is disabled
+  const tryProxyFirst = shouldUseProxy();
+  const headers = new Headers(init?.headers || { Accept: 'application/json' });
+
+  const toUpstream = (s: string): URL => {
+    try {
+      const u = new URL(s);
+      // If already pointing at proxy, extract upstream param
+      const isProxy = u.origin + u.pathname === `${FUNCTIONS_URL}/usgs-proxy`;
+      if (isProxy) {
+        const upstreamParam = u.searchParams.get('upstream');
+        if (upstreamParam) return new URL(upstreamParam);
+      }
+      return u;
+    } catch {
+      return new URL(urlString);
+    }
+  };
+
+  const upstream = toUpstream(urlString);
+  const makeProxyUrl = () => {
+    const u = new URL(`${FUNCTIONS_URL}/usgs-proxy`);
+    u.searchParams.set('upstream', upstream.toString());
+    return u.toString();
+  };
+  const makeDirectUrl = () => {
+    const u = new URL(upstream.toString());
+    const key = getUSGSApiKey();
+    if (key && !u.searchParams.has('api_key')) u.searchParams.set('api_key', key);
+    return u.toString();
+  };
+
+  const tryFetch = async (url: string) => fetch(url, { ...init, headers });
+
+  const sequences = tryProxyFirst
+    ? [makeProxyUrl(), makeDirectUrl()]
+    : [makeDirectUrl(), makeProxyUrl()];
+
+  let lastErr: any;
+  for (const u of sequences) {
+    try {
+      const resp = await tryFetch(u);
+      if (resp.ok) return resp;
+      // consider retrying next variant for 5xx or 0
+      if (resp.status >= 500 || resp.status === 0 || resp.status === 429) {
+        lastErr = new Error(`HTTP ${resp.status}`);
+        continue;
+      }
+      return resp; // for 4xx other than 429, just return
+    } catch (e) {
+      lastErr = e;
+      continue;
+    }
+  }
+  throw lastErr || new Error('Fetch failed');
 }
 
 // Calculate water level based on gage height value
@@ -282,8 +358,8 @@ export class USGSService {
           let attempts = 0;
           let resp: Response | null = null;
           while (attempts < 4) {
-            nextUrl = ensureApiKeyOnString(nextUrl);
-            resp = await fetch(nextUrl!, { signal: options?.signal, headers: { Accept: 'application/json' } });
+            // nextUrl may be an upstream or proxied URL; wrapper will handle proxy/direct and fallback
+            resp = await fetchWithProxyFallback(nextUrl!, { signal: options?.signal, headers: { Accept: 'application/json' } });
             if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
               const retryAfter = Number(resp.headers.get('retry-after'));
               const delayMs = !isNaN(retryAfter) ? retryAfter * 1000 : 500 * Math.pow(2, attempts);
@@ -664,7 +740,7 @@ export class USGSService {
       // Use rate limiter for large requests; bypass for tiny pre-checks (limit <= 1)
       const useLimiter = (options?.limit ?? 1000) > 1;
       const fetchOnce = async () => {
-        const resp = await fetch(url.toString(), { headers: { Accept: 'application/json' }, signal: options?.signal });
+        const resp = await fetchWithProxyFallback(url.toString(), { headers: { Accept: 'application/json' }, signal: options?.signal });
         if (!resp.ok) {
           const error = new Error(`HTTP ${resp.status}: ${resp.statusText}`);
           (error as any).status = resp.status;
