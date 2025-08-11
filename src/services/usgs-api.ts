@@ -1015,17 +1015,33 @@ export class USGSService {
 
     const tryDailyDatetime = async (id: string) => {
       const dt = `${start.toISOString()}/${end.toISOString()}`;
-      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
-      url.searchParams.set('monitoring_location_id', id);
-      url.searchParams.set('parameter_code', code);
-      url.searchParams.set('statistic_id', '00003');
-      url.searchParams.set('datetime', dt);
-      url.searchParams.set('limit', '20000');
-      url.searchParams.set('f', 'json');
+      // Attempt 1: daily-values with statistic_id
+      const url1 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+      url1.searchParams.set('monitoring_location_id', id);
+      url1.searchParams.set('parameter_code', code);
+      url1.searchParams.set('statistic_id', '00003');
+      url1.searchParams.set('datetime', dt);
+      url1.searchParams.set('limit', '20000');
+      url1.searchParams.set('f', 'json');
       console.log('[USGS] daily fetch', { id, code, datetime: dt });
       try {
-        const feats = await this.fetchPaged(url.toString(), signal);
-        return parseSeries(feats);
+        const feats = await this.fetchPaged(url1.toString(), signal);
+        const p1 = parseSeries(feats);
+        if (p1.length > 0) return p1;
+      } catch (e:any) {
+        if (e?.name === 'AbortError') throw e;
+      }
+      // Attempt 2: daily-values with statistic_code
+      try {
+        const url2 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+        url2.searchParams.set('monitoring_location_id', id);
+        url2.searchParams.set('parameter_code', code);
+        url2.searchParams.set('statistic_code', '00003');
+        url2.searchParams.set('datetime', dt);
+        url2.searchParams.set('limit', '20000');
+        url2.searchParams.set('f', 'json');
+        const feats2 = await this.fetchPaged(url2.toString(), signal);
+        return parseSeries(feats2);
       } catch (e:any) {
         if (e?.name === 'AbortError') throw e;
         return [] as { t:number; v:number }[];
@@ -1049,6 +1065,41 @@ export class USGSService {
           const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' } as any);
           const u = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items?${params.toString()}`));
           try { return parseSeries(await this.fetchPaged(u.toString(), signal)); } catch { return []; }
+        })(),
+        (async () => {
+          // Legacy NWIS Daily Values fallback
+          try {
+            const numeric = id.replace(/^USGS[:\-]?/i, '');
+            const dv = new URL('https://waterservices.usgs.gov/nwis/dv/');
+            dv.searchParams.set('format', 'json');
+            dv.searchParams.set('sites', numeric);
+            dv.searchParams.set('parameterCd', code);
+            dv.searchParams.set('statCd', '00003');
+            dv.searchParams.set('startDT', start.toISOString().slice(0,10));
+            dv.searchParams.set('endDT', end.toISOString().slice(0,10));
+            const resp = await fetch(dv.toString(), { signal, headers: { Accept: 'application/json' } });
+            if (!resp.ok) return [];
+            const j = await resp.json();
+            const tsArr = j?.value?.timeSeries || [];
+            const out: { t:number; v:number }[] = [];
+            for (const ts of tsArr) {
+              const varCode = ts?.variable?.variableCode?.[0]?.value;
+              if (varCode !== code) continue;
+              const vals = ts?.values || [];
+              for (const block of vals) {
+                const arr = block?.value || [];
+                for (const it of arr) {
+                  const t = Date.parse(it?.dateTime);
+                  const v = Number(it?.value);
+                  if (Number.isFinite(t) && Number.isFinite(v)) out.push({ t, v });
+                }
+              }
+            }
+            out.sort((a,b)=>a.t-b.t);
+            return out;
+          } catch {
+            return [];
+          }
         })(),
       ];
       for (const p of attempts) {
