@@ -60,21 +60,6 @@ export const COLOR_BY_CODE: Record<string, {type:'sequential'|'diverging'|'hazar
   '00095': { type: 'diverging',  colors: { low:'#2c7bb6', med:'#ffffbf', high:'#d7191c' }},
 };
 
-// ===== Discrete bins for certain parameters (fixed, novice-friendly) =====
-export type DiscreteBin = { label: string; min?: number; max?: number; color: string };
-export const DISCRETE_BINS: Record<string, DiscreteBin[] | undefined> = {
-  // 00400 — pH: EPA secondary drinking water recommendation 6.5–8.5
-  '00400': [
-    { label: 'Acidic (<6.5)', max: 6.5, color: COLOR_BY_CODE['00400'].colors.low },
-    { label: 'Neutral (6.5–8.5)', min: 6.5, max: 8.5, color: COLOR_BY_CODE['00400'].colors.med },
-    { label: 'Basic (>8.5)', min: 8.5, color: COLOR_BY_CODE['00400'].colors.high },
-  ],
-};
-
-export function discreteLegendForCode(code: string): DiscreteBin[] | null {
-  return DISCRETE_BINS[code] ? ([...(DISCRETE_BINS[code] as DiscreteBin[])]) : null;
-}
-
 // ===== Units per parameter code =====
 export const PARAM_UNIT: Record<string, string> = {
   '00065':'ft','00060':'ft³/s','00010':'°C','00400':'pH','00300':'mg/L',
@@ -98,21 +83,7 @@ export function computeThresholds(values: number[]): Thresholds | null {
 export function colorForValue(paramCode: string, value: number, th: Thresholds | (Thresholds & { q90?: number; extremeThreshold?: number; medThreshold?: number; highThreshold?: number }) | null): string {
   const config = COLOR_BY_CODE[paramCode];
   const scale = config?.colors as any;
-  if (!Number.isFinite(value)) return '#4a90e2';
-
-  // Discrete bins take precedence if defined (e.g., pH)
-  const bins = DISCRETE_BINS[paramCode];
-  if (bins && bins.length > 0) {
-    for (const b of bins) {
-      const minOk = b.min == null || value >= b.min;
-      const maxOk = b.max == null || value < b.max;
-      if (minOk && maxOk) return b.color;
-    }
-    // Fallback to last bin color if none matched due to equality edge cases
-    return bins[bins.length - 1].color;
-  }
-
-  if (!scale || !th) return '#4a90e2'; // fallback if no scale/thresholds
+  if (!scale || !Number.isFinite(value) || !th) return '#4a90e2'; // fallback
 
   // Special hazard logic for gage height (00065)
   if (paramCode === '00065') {
