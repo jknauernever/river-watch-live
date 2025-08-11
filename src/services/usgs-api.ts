@@ -1015,7 +1015,7 @@ export class USGSService {
 
     const tryDailyDatetime = async (id: string) => {
       const dt = `${start.toISOString()}/${end.toISOString()}`;
-      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily/items`));
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
       url.searchParams.set('monitoring_location_id', id);
       url.searchParams.set('parameter_code', code);
       url.searchParams.set('statistic_id', '00003');
@@ -1042,12 +1042,12 @@ export class USGSService {
       const attempts: Array<Promise<{ t:number; v:number }[]>> = [
         (async () => {
           const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', start: start.toISOString(), end: end.toISOString(), limit: '20000' } as any);
-          const u = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily/items?${params.toString()}`));
+          const u = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items?${params.toString()}`));
           try { return parseSeries(await this.fetchPaged(u.toString(), signal)); } catch { return []; }
         })(),
         (async () => {
           const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', startDt: start.toISOString(), endDt: end.toISOString(), limit: '20000' } as any);
-          const u = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily/items?${params.toString()}`));
+          const u = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items?${params.toString()}`));
           try { return parseSeries(await this.fetchPaged(u.toString(), signal)); } catch { return []; }
         })(),
       ];
