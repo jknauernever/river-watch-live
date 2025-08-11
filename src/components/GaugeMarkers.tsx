@@ -165,13 +165,18 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, haz
     return marker;
   }, [map, activeCodes, thresholds, hazardBySite]);
 
+  // Force redraw when active parameter changes
+  useEffect(() => {
+    clearMarkers();
+  }, [activeCode, clearMarkers]);
+
   // Sync markers with locations and color bins
   useEffect(() => {
     if (!map) return;
 
     // Only include sites that have a value for the currently active parameter
     const filtered = basicLocations.filter((l) =>
-      (l.params || []).some((p) => p.code === activeCode && Number.isFinite(p.value))
+      (l.params || []).some((p) => p.code === activeCode && Number.isFinite(Number(p.value)))
     );
 
     const nextIds = new Set(filtered.map((l) => l.siteId));
