@@ -4,4 +4,4 @@ project_id = "lcebfbqjwgwgmwajujwq"
 verify_jwt = false
 
 [functions.get-usgs-api-key]
-verify_jwt = false
+verify_jwt = true

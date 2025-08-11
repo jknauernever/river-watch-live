@@ -90,7 +90,19 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
       infoWindowRef.current?.close();
       const container = document.createElement('div');
       container.className = 'max-w-sm';
-      container.innerHTML = `<div class="p-3 max-w-sm"><div class="font-semibold mb-1">${location.name}</div><div class="text-sm">Loading data…</div></div>`;
+      {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'p-3 max-w-sm';
+        const title = document.createElement('div');
+        title.className = 'font-semibold mb-1';
+        title.textContent = location.name;
+        const msg = document.createElement('div');
+        msg.className = 'text-sm';
+        msg.textContent = 'Loading data…';
+        wrapper.appendChild(title);
+        wrapper.appendChild(msg);
+        container.appendChild(wrapper);
+      }
       infoWindowRef.current = new google.maps.InfoWindow({ content: container });
       infoWindowRef.current.open(map, marker);
 
@@ -118,7 +130,20 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds }: G
           })
         );
       } catch (e) {
-        container.innerHTML = `<div class=\"p-3 max-w-sm\"><div class=\"font-semibold mb-1\">${location.name}</div><div class=\"text-sm text-destructive\">Failed to load data.</div></div>`;
+        while (container.firstChild) container.removeChild(container.firstChild);
+        {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'p-3 max-w-sm';
+          const title = document.createElement('div');
+          title.className = 'font-semibold mb-1';
+          title.textContent = location.name;
+          const msg = document.createElement('div');
+          msg.className = 'text-sm text-destructive';
+          msg.textContent = 'Failed to load data.';
+          wrapper.appendChild(title);
+          wrapper.appendChild(msg);
+          container.appendChild(wrapper);
+        }
       }
     });
 
