@@ -4,7 +4,8 @@ import { usgsService } from '@/services/usgs-api';
 import { aggregateMonthly, downsampleEven, formatTimestamp, formatValueWithUnit, gradientCssForCode, pickUnit, TV } from '@/lib/popup-utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Info } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import usgsLogo from '@/assets/usgs-logo.svg';
 
 interface SitePopupProps {
@@ -282,7 +283,21 @@ export const SitePopup: React.FC<SitePopupProps> = ({ site, attributes, latestFe
 
       {/* Legend */}
       <div className="mt-3">
-        <div className="text-xs font-medium mb-1">Legend</div>
+        <div className="flex items-center gap-1 mb-1">
+          <div className="text-xs font-medium">Legend</div>
+          {activeCode === '00065' && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button className="text-muted-foreground hover:text-foreground" aria-label="About gage height">
+                  <Info className="w-3.5 h-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                Gage height (USGS 00065) is the water-surface elevation relative to a local gage datum, not river depth. Large values can be normal.
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
         {activeCode === '00065' ? (
           <>
             <div className="grid grid-cols-4 gap-2 items-center">
