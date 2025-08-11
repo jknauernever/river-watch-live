@@ -40,15 +40,23 @@ function ensureProxyUrl(url: URL): URL {
 }
 
 function ensureApiKey(url: URL): URL {
-  // Backwards-compatible wrapper: now proxies unless disabled
-  return ensureProxyUrl(url);
+  // Inject API key on the upstream URL only; proxying is handled at fetch time
+  const key = getUSGSApiKey();
+  if (key && !url.searchParams.has('api_key')) {
+    url.searchParams.set('api_key', key);
+  }
+  return url;
 }
 
 function ensureApiKeyOnString(urlString: string | null): string | null {
   if (!urlString) return null;
   try {
     const u = new URL(urlString);
-    return ensureProxyUrl(u).toString();
+    const key = getUSGSApiKey();
+    if (key && !u.searchParams.has('api_key')) {
+      u.searchParams.set('api_key', key);
+    }
+    return u.toString();
   } catch {
     return urlString;
   }
