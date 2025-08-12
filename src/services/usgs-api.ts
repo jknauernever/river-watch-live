@@ -15,13 +15,8 @@ function getUSGSApiKey(): string {
 }
 
 function shouldUseProxy(): boolean {
-  try {
-    if (typeof window === 'undefined') return true;
-    const v = localStorage.getItem('use-usgs-proxy');
-    return v === null ? true : v !== 'false';
-  } catch {
-    return true;
-  }
+  // Always prefer proxy; client toggle removed. Fallback logic handles failures.
+  return true;
 }
 
 function ensureProxyUrl(url: URL): URL {
