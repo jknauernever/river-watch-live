@@ -1,5 +1,4 @@
 import React from "react";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Info } from "lucide-react";
 
@@ -12,10 +11,10 @@ interface InfoDrawerProps {
 }
 
 /**
- * A right-side info drawer with a persistent, subtle edge toggle.
- * - Always shows a slim trigger on the right edge.
- * - When open, a sheet slides in from the right.
- * - Content is provided via children.
+ * Inline right-side info drawer that takes layout space (no overlay).
+ * - Bounded by parent height; use inside a flex row next to the map
+ * - When closed, it collapses to a slim tab that is always visible
+ * - When open, it expands to the provided widthClass
  */
 export const InfoDrawer: React.FC<InfoDrawerProps> = ({
   open,
@@ -25,16 +24,22 @@ export const InfoDrawer: React.FC<InfoDrawerProps> = ({
   children,
 }) => {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      {/* Persistent edge toggle */}
+    <aside
+      className={cn(
+        "relative h-full shrink-0 border-l bg-background transition-[width] duration-300 ease-out",
+        open ? widthClass : "w-3"
+      )}
+      aria-label="Information panel"
+    >
+      {/* Persistent edge toggle (sits at the inner boundary) */}
       <button
         type="button"
         aria-label={open ? "Close info panel" : "Open info panel"}
         onClick={() => onOpenChange(!open)}
         className={cn(
-          "fixed right-2 top-1/2 z-30 -translate-y-1/2 origin-right",
-          "h-10 w-8 rounded-l-md border bg-background text-foreground",
-          "shadow-sm transition-transform hover:scale-[1.02]"
+          "absolute left-0 top-1/2 z-10 -translate-y-1/2 -translate-x-1/2",
+          "h-10 w-6 rounded-l-md border bg-background text-foreground shadow-sm",
+          "hover:scale-[1.03] transition"
         )}
       >
         {open ? (
@@ -44,22 +49,26 @@ export const InfoDrawer: React.FC<InfoDrawerProps> = ({
         )}
       </button>
 
-      {/* Drawer content */}
-      <SheetContent side="right" className={cn("p-0", widthClass)}>
-        <div className="h-full overflow-y-auto">
-          {children ?? (
-            <div className="p-6 text-sm text-muted-foreground">
-              {!hasSelection ? (
-                <div className="flex items-start gap-3">
-                  <Info className="h-4 w-4 mt-0.5" />
-                  <p>Select a gauge on the map to see detailed information here.</p>
-                </div>
-              ) : null}
-            </div>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
+      {/* Drawer content area */}
+      <div
+        className={cn(
+          "h-full overflow-y-auto",
+          "transition-opacity duration-200",
+          open ? "opacity-100" : "opacity-0 pointer-events-none"
+        )}
+      >
+        {children ?? (
+          <div className="p-6 text-sm text-muted-foreground">
+            {!hasSelection ? (
+              <div className="flex items-start gap-3">
+                <Info className="h-4 w-4 mt-0.5" />
+                <p>Select a gauge on the map to see detailed information here.</p>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </aside>
   );
 };
 

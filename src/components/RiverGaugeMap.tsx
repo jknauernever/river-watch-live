@@ -373,6 +373,19 @@ const th: Record<string, any> = t
     loadGaugeLocations();
   }, [selectedDataset, map, isLoaded, loadGaugeLocations]);
 
+  // Resize map when drawer toggles to avoid white space
+  useEffect(() => {
+    if (!map || !window.google) return;
+    const id = window.setTimeout(() => {
+      try {
+        window.google.maps.event.trigger(map, 'resize');
+        const c = map.getCenter();
+        if (c) map.setCenter(c);
+      } catch {}
+    }, 250);
+    return () => window.clearTimeout(id);
+  }, [infoOpen, map]);
+
   // Periodically update rate limit status
 
   const getUSGSApiKey = useCallback(() => {
@@ -415,285 +428,290 @@ const th: Record<string, any> = t
 
   return (
     <div className="relative w-full h-screen bg-background">
-      {/* Map Container */}
-      <MapContainer />
+      <div className="flex h-full w-full">
+        {/* Map area */}
+        <div className="relative flex-1">
+          {/* Map Container */}
+          <MapContainer />
 
-      {/* Loading overlay to prevent white screen */}
-      {!isLoaded && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="rounded-md bg-background/80 backdrop-blur-sm px-3 py-2 text-sm">
-            Loading map…
-          </div>
-        </div>
-      )}
-
-      {/* Markers */}
-      {basicGaugeLocations.length > 0 && (
-        <GaugeMarkers
-          map={map}
-          basicLocations={basicGaugeLocations}
-          activeCodes={activeCodes}
-          thresholds={thresholds}
-          onSiteSelect={handleSiteSelect}
-        />
-      )}
-      
-      {/* Header: search + mobile dataset trigger */}
-      <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
-        <Card className="flex-1 max-w-md pointer-events-auto">
-          <CardContent className="p-3">
-            <input
-              id="search-input"
-              type="text"
-              placeholder="Search for a location..."
-              onFocus={handleSearchFocus}
-              className="w-full border-0 outline-none bg-transparent text-foreground placeholder:text-muted-foreground"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Mobile: Dataset drawer trigger */}
-        <div className="ml-3 md:hidden pointer-events-auto">
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button variant="outline" size="sm">Dataset</Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-72 p-0">
-              <div className="p-4 space-y-4">
-                <div>
-                  <div className="text-sm font-semibold mb-2">Dataset</div>
-                  <RadioGroup value={selectedDataset} onValueChange={(v) => setSelectedDataset(v as any)}>
-                    {(Object.keys(DATASETS) as DatasetKey[]).map((name) => {
-                      const code = DATASETS[name][0];
-                      const id = `ds-mobile-${code}`;
-                      const disabled = datasetAvailability[name] === false;
-                      return (
-                        <div key={name} className="flex items-center gap-2 py-1">
-                          <RadioGroupItem id={id} value={name} disabled={disabled} />
-                          <div className="flex items-center">
-                            <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>{name}</Label>
-                            <InfoPopover title={name} html={DATASET_INFO_HTML[name] || "No description yet."} side="right" />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </RadioGroup>
-                </div>
-
-                {/* Legend (compact) */}
-                <div>
-                  <div className="text-sm font-semibold mb-2">Legend</div>
-                  <div className="text-sm mb-1">{PARAM_LABEL[DATASETS[selectedDataset][0]] || selectedDataset}</div>
-                  {(() => {
-                    const code = DATASETS[selectedDataset][0];
-                    if (code === '00065') {
-                      const colors = (COLOR_BY_CODE['00065']?.colors as any) || {};
-                      return (
-                        <div className="w-48">
-                          <div className="grid grid-cols-2 gap-1 items-center">
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.low }} />
-                              <span className="text-xs">Low</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.med }} />
-                              <span className="text-xs">Med</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.high }} />
-                              <span className="text-xs">High</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.extreme || colors.high }} />
-                              <span className="text-xs">Extreme</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }
-                    const colors = COLOR_BY_CODE[code]?.colors || { low:'#d4f0ff', med:'#4a90e2', high:'#08306b' };
-                    const gradient = `linear-gradient(to right, ${colors.low}, ${colors.med}, ${colors.high})`;
-                    const t = thresholds[code];
-                    const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
-                    return (
-                      <>
-                        <div className="h-2 rounded w-48" style={{ background: gradient }} />
-                        {t ? (
-                          <div className="mt-1 text-xs text-muted-foreground">{legendTicks({ min:t.min, q33:t.q33, q66:t.q66, max:t.max }, unit)}</div>
-                        ) : null}
-                      </>
-                    );
-                  })()}
-                
-                </div>
-
-                {/* Status */}
-                <div aria-live="polite" className="text-xs text-muted-foreground">
-                  {basicGaugeLocations.length > 0
-                    ? `${basicGaugeLocations.length} gauges in view`
-                    : `No gauges with latest ${selectedDataset} in view.`}
-                </div>
-
+          {/* Loading overlay to prevent white screen */}
+          {!isLoaded && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="rounded-md bg-background/80 backdrop-blur-sm px-3 py-2 text-sm">
+                Loading map…
               </div>
-            </SheetContent>
-          </Sheet>
-        </div>
+            </div>
+          )}
 
-      </div>
-
-      {/* Desktop left sidebar */}
-      <div className={`hidden md:block absolute top-24 left-4 z-10 pointer-events-none ${datasetOpen ? 'w-64' : 'w-28'}`}>
-        <Card className="pointer-events-auto">
-          <CardContent className="p-4">
-            <Collapsible open={datasetOpen} onOpenChange={setDatasetOpen}>
-              <CollapsibleTrigger asChild>
-                <button className="flex w-full items-center justify-between text-sm font-semibold py-1">
-                  <span>Dataset</span>
-                  <ChevronDown className={cn("h-4 w-4 transition-transform", datasetOpen ? "rotate-180" : "rotate-0")} aria-hidden="true" />
-                </button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="space-y-4 pt-2">
-                <div>
-                  <RadioGroup value={selectedDataset} onValueChange={(v) => setSelectedDataset(v as any)}>
-                    {(Object.keys(DATASETS) as DatasetKey[]).map((name) => {
-                      const code = DATASETS[name][0];
-                      const id = `ds-${code}`;
-                      const disabled = datasetAvailability[name] === false;
-                      return (
-                        <div key={name} className="flex items-center gap-2 py-1">
-                          <RadioGroupItem id={id} value={name} disabled={disabled} />
-                          <div className="flex items-center">
-                            <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>{name}</Label>
-                            <InfoPopover title={name} html={DATASET_INFO_HTML[name] || "No description yet."} side="right" />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </RadioGroup>
-                </div>
-
-                {/* Legend (compact) */}
-                <div>
-                  <div className="text-sm font-semibold mb-2">Legend</div>
-                  <div className="text-sm mb-1">{PARAM_LABEL[DATASETS[selectedDataset][0]] || selectedDataset}</div>
-                  {(() => {
-                    const code = DATASETS[selectedDataset][0];
-                    if (code === '00065') {
-                      const colors = (COLOR_BY_CODE['00065']?.colors as any) || {};
-                      return (
-                        <div className="w-48">
-                          <div className="grid grid-cols-2 gap-1 items-center">
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.low }} />
-                              <span className="text-xs">Low</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.med }} />
-                              <span className="text-xs">Med</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.high }} />
-                              <span className="text-xs">High</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.extreme || colors.high }} />
-                              <span className="text-xs">Extreme</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }
-                    const colors = COLOR_BY_CODE[code]?.colors || { low:'#d4f0ff', med:'#4a90e2', high:'#08306b' };
-                    const gradient = `linear-gradient(to right, ${colors.low}, ${colors.med}, ${colors.high})`;
-                    const t = thresholds[code];
-                    const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
-                    return (
-                      <>
-                        <div className="h-2 rounded w-48" style={{ background: gradient }} />
-                        {t ? (
-                          <div className="mt-1 text-xs text-muted-foreground">{legendTicks({ min:t.min, q33:t.q33, q66:t.q66, max:t.max }, unit)}</div>
-                        ) : null}
-                      </>
-                    );
-                  })()}
-
-                </div>
-
-                {/* Status */}
-                <div aria-live="polite" className="text-xs text-muted-foreground">
-                  {basicGaugeLocations.length > 0
-                    ? `${basicGaugeLocations.length} gauges in view`
-                    : `No gauges with latest ${selectedDataset} in view.`}
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Rate Limiting Status */}
-
-      {/* Demo Data Warning */}
-      {isUsingDemoData && (
-        <div className="absolute top-4 right-4 z-20 pointer-events-none">
-          <div className="bg-red-600 text-white px-3 py-2 rounded-md shadow-lg font-bold text-sm pointer-events-auto">
-            Warning: Demo Data
-          </div>
-        </div>
-      )}
-
-      {/* Loading indicator */}
-      {isLoading && renderMode === 'loading' && (
-        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
-          <Card className="pointer-events-auto">
-            <CardContent className="p-3 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-sm">
-                {fetchProgress
-                  ? `Fetching gauges${fetchProgress.total ? `: ${fetchProgress.fetched} of ${fetchProgress.total}` : `: ${fetchProgress.fetched}...`}`
-                  : 'Fetching gauges...'}
-              </span>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Too many markers notice */}
-      {renderMode === 'blocked' && tooManyInExtent && (
-        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
-          <Card className="pointer-events-auto">
-            <CardContent className="p-3">
-              <div className="text-sm">Zoom in closer to see markers.</div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Count unavailable notice */}
-      {countUnavailable && (
-        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
-          <Card className="pointer-events-auto">
-            <CardContent className="p-3">
-              <div className="text-sm">Gauge count is currently unavailable. Zoom in closer or try again.</div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      <InfoDrawer open={infoOpen} onOpenChange={setInfoOpen} hasSelection={!!selectedSite}>
-        {selectedSite ? (
-          <div className="p-4">
-            <SitePopup
-              site={selectedSite.site}
-              attributes={selectedSite.attributes}
-              latestFeatures={selectedSite.latestFeatures || []}
-              activeCode={activeCode}
-              thresholds={(thresholds as any)[activeCode] || null}
+          {/* Markers */}
+          {basicGaugeLocations.length > 0 && (
+            <GaugeMarkers
+              map={map}
+              basicLocations={basicGaugeLocations}
+              activeCodes={activeCodes}
+              thresholds={thresholds}
+              onSiteSelect={handleSiteSelect}
             />
-          </div>
-        ) : null}
-      </InfoDrawer>
+          )}
+          
+          {/* Header: search + mobile dataset trigger */}
+          <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
+            <Card className="flex-1 max-w-md pointer-events-auto">
+              <CardContent className="p-3">
+                <input
+                  id="search-input"
+                  type="text"
+                  placeholder="Search for a location..."
+                  onFocus={handleSearchFocus}
+                  className="w-full border-0 outline-none bg-transparent text-foreground placeholder:text-muted-foreground"
+                />
+              </CardContent>
+            </Card>
 
+            {/* Mobile: Dataset drawer trigger */}
+            <div className="ml-3 md:hidden pointer-events-auto">
+              <Sheet>
+                <SheetTrigger asChild>
+                  <Button variant="outline" size="sm">Dataset</Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-72 p-0">
+                  <div className="p-4 space-y-4">
+                    <div>
+                      <div className="text-sm font-semibold mb-2">Dataset</div>
+                      <RadioGroup value={selectedDataset} onValueChange={(v) => setSelectedDataset(v as any)}>
+                        {(Object.keys(DATASETS) as DatasetKey[]).map((name) => {
+                          const code = DATASETS[name][0];
+                          const id = `ds-mobile-${code}`;
+                          const disabled = datasetAvailability[name] === false;
+                          return (
+                            <div key={name} className="flex items-center gap-2 py-1">
+                              <RadioGroupItem id={id} value={name} disabled={disabled} />
+                              <div className="flex items-center">
+                                <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>{name}</Label>
+                                <InfoPopover title={name} html={DATASET_INFO_HTML[name] || "No description yet."} side="right" />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </RadioGroup>
+                    </div>
+
+                    {/* Legend (compact) */}
+                    <div>
+                      <div className="text-sm font-semibold mb-2">Legend</div>
+                      <div className="text-sm mb-1">{PARAM_LABEL[DATASETS[selectedDataset][0]] || selectedDataset}</div>
+                      {(() => {
+                        const code = DATASETS[selectedDataset][0];
+                        if (code === '00065') {
+                          const colors = (COLOR_BY_CODE['00065']?.colors as any) || {};
+                          return (
+                            <div className="w-48">
+                              <div className="grid grid-cols-2 gap-1 items-center">
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.low }} />
+                                  <span className="text-xs">Low</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.med }} />
+                                  <span className="text-xs">Med</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.high }} />
+                                  <span className="text-xs">High</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.extreme || colors.high }} />
+                                  <span className="text-xs">Extreme</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                        const colors = COLOR_BY_CODE[code]?.colors || { low:'#d4f0ff', med:'#4a90e2', high:'#08306b' };
+                        const gradient = `linear-gradient(to right, ${colors.low}, ${colors.med}, ${colors.high})`;
+                        const t = thresholds[code];
+                        const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
+                        return (
+                          <>
+                            <div className="h-2 rounded w-48" style={{ background: gradient }} />
+                            {t ? (
+                              <div className="mt-1 text-xs text-muted-foreground">{legendTicks({ min:t.min, q33:t.q33, q66:t.q66, max:t.max }, unit)}</div>
+                            ) : null}
+                          </>
+                        );
+                      })()}
+                    
+                    </div>
+
+                    {/* Status */}
+                    <div aria-live="polite" className="text-xs text-muted-foreground">
+                      {basicGaugeLocations.length > 0
+                        ? `${basicGaugeLocations.length} gauges in view`
+                        : `No gauges with latest ${selectedDataset} in view.`}
+                    </div>
+
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+
+          </div>
+
+          {/* Desktop left sidebar */}
+          <div className={`hidden md:block absolute top-24 left-4 z-10 pointer-events-none ${datasetOpen ? 'w-64' : 'w-28'}`}>
+            <Card className="pointer-events-auto">
+              <CardContent className="p-4">
+                <Collapsible open={datasetOpen} onOpenChange={setDatasetOpen}>
+                  <CollapsibleTrigger asChild>
+                    <button className="flex w-full items-center justify-between text-sm font-semibold py-1">
+                      <span>Dataset</span>
+                      <ChevronDown className={cn("h-4 w-4 transition-transform", datasetOpen ? "rotate-180" : "rotate-0")} aria-hidden="true" />
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-4 pt-2">
+                    <div>
+                      <RadioGroup value={selectedDataset} onValueChange={(v) => setSelectedDataset(v as any)}>
+                        {(Object.keys(DATASETS) as DatasetKey[]).map((name) => {
+                          const code = DATASETS[name][0];
+                          const id = `ds-${code}`;
+                          const disabled = datasetAvailability[name] === false;
+                          return (
+                            <div key={name} className="flex items-center gap-2 py-1">
+                              <RadioGroupItem id={id} value={name} disabled={disabled} />
+                              <div className="flex items-center">
+                                <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>{name}</Label>
+                                <InfoPopover title={name} html={DATASET_INFO_HTML[name] || "No description yet."} side="right" />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </RadioGroup>
+                    </div>
+
+                    {/* Legend (compact) */}
+                    <div>
+                      <div className="text-sm font-semibold mb-2">Legend</div>
+                      <div className="text-sm mb-1">{PARAM_LABEL[DATASETS[selectedDataset][0]] || selectedDataset}</div>
+                      {(() => {
+                        const code = DATASETS[selectedDataset][0];
+                        if (code === '00065') {
+                          const colors = (COLOR_BY_CODE['00065']?.colors as any) || {};
+                          return (
+                            <div className="w-48">
+                              <div className="grid grid-cols-2 gap-1 items-center">
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.low }} />
+                                  <span className="text-xs">Low</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.med }} />
+                                  <span className="text-xs">Med</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.high }} />
+                                  <span className="text-xs">High</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.extreme || colors.high }} />
+                                  <span className="text-xs">Extreme</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                        const colors = COLOR_BY_CODE[code]?.colors || { low:'#d4f0ff', med:'#4a90e2', high:'#08306b' };
+                        const gradient = `linear-gradient(to right, ${colors.low}, ${colors.med}, ${colors.high})`;
+                        const t = thresholds[code];
+                        const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
+                        return (
+                          <>
+                            <div className="h-2 rounded w-48" style={{ background: gradient }} />
+                            {t ? (
+                              <div className="mt-1 text-xs text-muted-foreground">{legendTicks({ min:t.min, q33:t.q33, q66:t.q66, max:t.max }, unit)}</div>
+                            ) : null}
+                          </>
+                        );
+                      })()}
+
+                    </div>
+
+                    {/* Status */}
+                    <div aria-live="polite" className="text-xs text-muted-foreground">
+                      {basicGaugeLocations.length > 0
+                        ? `${basicGaugeLocations.length} gauges in view`
+                        : `No gauges with latest ${selectedDataset} in view.`}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Rate Limiting Status */}
+
+          {/* Demo Data Warning */}
+          {isUsingDemoData && (
+            <div className="absolute top-4 right-4 z-20 pointer-events-none">
+              <div className="bg-red-600 text-white px-3 py-2 rounded-md shadow-lg font-bold text-sm pointer-events-auto">
+                Warning: Demo Data
+              </div>
+            </div>
+          )}
+
+          {/* Loading indicator */}
+          {isLoading && renderMode === 'loading' && (
+            <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
+              <Card className="pointer-events-auto">
+                <CardContent className="p-3 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-sm">
+                    {fetchProgress
+                      ? `Fetching gauges${fetchProgress.total ? `: ${fetchProgress.fetched} of ${fetchProgress.total}` : `: ${fetchProgress.fetched}...`}`
+                      : 'Fetching gauges...'}
+                  </span>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Too many markers notice */}
+          {renderMode === 'blocked' && tooManyInExtent && (
+            <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
+              <Card className="pointer-events-auto">
+                <CardContent className="p-3">
+                  <div className="text-sm">Zoom in closer to see markers.</div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Count unavailable notice */}
+          {countUnavailable && (
+            <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
+              <Card className="pointer-events-auto">
+                <CardContent className="p-3">
+                  <div className="text-sm">Gauge count is currently unavailable. Zoom in closer or try again.</div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </div>
+
+        {/* Right info drawer (takes layout space, no overlay) */}
+        <InfoDrawer open={infoOpen} onOpenChange={setInfoOpen} hasSelection={!!selectedSite}>
+          {selectedSite ? (
+            <div className="p-4">
+              <SitePopup
+                site={selectedSite.site}
+                attributes={selectedSite.attributes}
+                latestFeatures={selectedSite.latestFeatures || []}
+                activeCode={activeCode}
+                thresholds={(thresholds as any)[activeCode] || null}
+              />
+            </div>
+          ) : undefined}
+        </InfoDrawer>
+      </div>
     </div>
   );
 };
