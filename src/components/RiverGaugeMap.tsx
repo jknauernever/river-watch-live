@@ -9,7 +9,7 @@ import { GaugeMarkers } from '@/components/GaugeMarkers';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, RotateCcw } from 'lucide-react';
+import { Loader2, RotateCcw, ChevronDown } from 'lucide-react';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -17,6 +17,7 @@ import { DATASETS, DatasetKey, PARAM_LABEL, COLOR_BY_CODE, computeThresholds, le
 import InfoPopover from '@/components/InfoPopover';
 import { DATASET_INFO_HTML } from '@/constants/datasetInfo';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { cn } from '@/lib/utils';
 
 
 
@@ -37,6 +38,7 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
   const [countUnavailable, setCountUnavailable] = useState(false);
   const [renderMode, setRenderMode] = useState<'loading' | 'blocked' | 'markers' | 'countUnavailable'>('loading');
+  const [datasetOpen, setDatasetOpen] = useState(true);
 
   
   // Parameter filtering and thresholds
@@ -512,16 +514,16 @@ const th: Record<string, any> = t
       </div>
 
       {/* Desktop left sidebar */}
-      <div className="hidden md:block absolute top-24 left-4 z-10 w-64 pointer-events-none">
+      <div className={`hidden md:block absolute top-24 left-4 z-10 pointer-events-none ${datasetOpen ? 'w-64' : 'w-28'}`}>
         <Card className="pointer-events-auto">
           <CardContent className="p-4">
-            <Collapsible defaultOpen>
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">Dataset</div>
-                <CollapsibleTrigger asChild>
-                  <Button variant="ghost" size="sm" className="px-2">Toggle</Button>
-                </CollapsibleTrigger>
-              </div>
+            <Collapsible open={datasetOpen} onOpenChange={setDatasetOpen}>
+              <CollapsibleTrigger asChild>
+                <button className="flex w-full items-center justify-between text-sm font-semibold py-1">
+                  <span>Dataset</span>
+                  <ChevronDown className={cn("h-4 w-4 transition-transform", datasetOpen ? "rotate-180" : "rotate-0")} aria-hidden="true" />
+                </button>
+              </CollapsibleTrigger>
               <CollapsibleContent className="space-y-4 pt-2">
                 <div>
                   <RadioGroup value={selectedDataset} onValueChange={(v) => setSelectedDataset(v as any)}>
