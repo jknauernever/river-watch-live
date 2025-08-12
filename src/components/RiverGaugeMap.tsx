@@ -45,7 +45,28 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
   const [infoOpen, setInfoOpen] = useState(false);
   const [selectedSite, setSelectedSite] = useState<{ site: { siteId: string; name: string; coordinates: [number, number]; siteType?: string }, attributes: any | null, latestFeatures: any[] | null } | null>(null);
-  
+
+  const handleSiteSelect = useCallback((siteBasic: { siteId: string; name: string; coordinates: [number, number]; siteType?: string; params?: Array<{ code: string; value: number; unit?: string; time?: string; label?: string }> }) => {
+    const latestFeatures = (siteBasic.params || []).map((p) => ({
+      type: 'Feature',
+      properties: {
+        parameter_code: p.code,
+        parameter_name: p.label,
+        value: String(p.value),
+        unit_of_measure: p.unit,
+        time: p.time,
+        monitoring_location_id: `USGS-${siteBasic.siteId}`,
+      },
+    }));
+
+    setSelectedSite({
+      site: { siteId: siteBasic.siteId, name: siteBasic.name, coordinates: siteBasic.coordinates, siteType: siteBasic.siteType },
+      attributes: null,
+      latestFeatures,
+    });
+    setInfoOpen(true);
+  }, []);
+
   // Parameter filtering and thresholds
   const [activeCodes, setActiveCodes] = useState<string[]>(['00060','00065']);
   const activeCode = activeCodes[0] || '00065';
@@ -413,6 +434,7 @@ const th: Record<string, any> = t
           basicLocations={basicGaugeLocations}
           activeCodes={activeCodes}
           thresholds={thresholds}
+          onSiteSelect={handleSiteSelect}
         />
       )}
       
@@ -658,6 +680,19 @@ const th: Record<string, any> = t
         </div>
       )}
 
+      <InfoDrawer open={infoOpen} onOpenChange={setInfoOpen} hasSelection={!!selectedSite}>
+        {selectedSite ? (
+          <div className="p-4">
+            <SitePopup
+              site={selectedSite.site}
+              attributes={selectedSite.attributes}
+              latestFeatures={selectedSite.latestFeatures || []}
+              activeCode={activeCode}
+              thresholds={(thresholds as any)[activeCode] || null}
+            />
+          </div>
+        ) : null}
+      </InfoDrawer>
 
     </div>
   );
