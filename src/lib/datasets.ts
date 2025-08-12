@@ -36,7 +36,7 @@ export const COLOR_BY_CODE: Record<string, {type:'sequential'|'diverging'|'hazar
   '00065': { type: 'hazard', colors: { low: '#2ca25f', med: '#ffcc00', high: '#e31a1c', extreme: '#6a3d9a' }},
 
   // 00060 — Discharge (aqua → deep teal)
-  '00060': { type: 'sequential', colors: { low:'#d0f0e0', med:'#4ab0a6', high:'#004d47' }},
+  '00060': { type: 'sequential', colors: { low:'#2ca25f', med:'#ffcc00', high:'#e31a1c' }},
 
   // 00010 — Water temperature (cold→hot, diverging)
   '00010': { type: 'diverging',  colors: { low:'#2b83ba', med:'#ffffbf', high:'#d7191c' }},
