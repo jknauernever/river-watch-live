@@ -1,11 +1,6 @@
 /// <reference types="google.maps" />
 import { useEffect, useRef, useCallback } from 'react';
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import { usgsService } from '@/services/usgs-api';
 import { colorForValue } from '@/lib/datasets';
-import { SitePopup } from '@/components/SitePopup';
-import { TooltipProvider } from '@/components/ui/tooltip';
 
 interface BasicLocation {
   siteId: string;
@@ -22,23 +17,21 @@ interface GaugeMarkersProps {
   activeCodes: string[];
   thresholds: Record<string, { q33: number; q66: number; min: number; max: number } | undefined>;
   hazardBySite?: Record<string, { medThreshold: number; highThreshold: number; extremeThreshold: number; source?: string; floodStageValue?: number }>;
+  onSiteSelect?: (site: BasicLocation) => void;
 }
 
-export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, hazardBySite }: GaugeMarkersProps) => {
-  const markersRef = useRef<google.maps.Marker[]>([]);
-  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
-  const markerMapRef = useRef<Map<string, google.maps.Marker>>(new Map());
+export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, hazardBySite, onSiteSelect }: GaugeMarkersProps) => {
+const markersRef = useRef<google.maps.Marker[]>([]);
+const markerMapRef = useRef<Map<string, google.maps.Marker>>(new Map());
 
-  const clearMarkers = useCallback(() => {
-    // Remove any markers tracked in array
-    markersRef.current.forEach(marker => marker.setMap(null));
-    markersRef.current = [];
-    // Also remove any markers tracked in the map
-    markerMapRef.current.forEach((marker) => marker.setMap(null));
-    markerMapRef.current.clear();
-    // Close any open infowindow
-    infoWindowRef.current?.close();
-  }, []);
+const clearMarkers = useCallback(() => {
+  // Remove any markers tracked in array
+  markersRef.current.forEach(marker => marker.setMap(null));
+  markersRef.current = [];
+  // Also remove any markers tracked in the map
+  markerMapRef.current.forEach((marker) => marker.setMap(null));
+  markerMapRef.current.clear();
+}, []);
 
   // Use selected dataset code (first active code)
   const activeCode = activeCodes[0] || '00065';
@@ -94,80 +87,13 @@ export const GaugeMarkers = ({ map, basicLocations, activeCodes, thresholds, haz
       // noop if opacity not supported
     }
 
-    marker.addListener('click', async () => {
-      // Create container and open InfoWindow immediately
-      infoWindowRef.current?.close();
-      const container = document.createElement('div');
-      container.className = 'max-w-sm';
-      {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'p-3 max-w-sm';
-        const title = document.createElement('div');
-        title.className = 'font-semibold mb-1';
-        title.textContent = location.name;
-        const msg = document.createElement('div');
-        msg.className = 'text-sm';
-        msg.textContent = 'Loading data…';
-        wrapper.appendChild(title);
-        wrapper.appendChild(msg);
-        container.appendChild(wrapper);
-      }
-      infoWindowRef.current = new google.maps.InfoWindow({ content: container });
-      infoWindowRef.current.open(map, marker);
-
-      let root: ReturnType<typeof createRoot> | null = null;
-      const closeListener = google.maps.event.addListenerOnce(infoWindowRef.current, 'closeclick', () => {
-        try { root?.unmount?.(); } catch {}
-        root = null;
-      });
-
-      // Render immediately using known params, then hydrate with full data when ready
-      const initialLatest = (location.params || []).map((p) => ({
-        properties: {
-          parameter_code: p.code,
-          parameter_name: p.label,
-          unit: p.unit,
-          value: p.value,
-          time: p.time,
-        }
-      }));
-      root = createRoot(container);
-      root.render(
-        React.createElement(TooltipProvider, null,
-          React.createElement(SitePopup, {
-            site: { siteId: location.siteId, name: location.name, coordinates: location.coordinates, siteType: location.siteType },
-            attributes: null,
-            latestFeatures: initialLatest,
-            activeCode,
-            thresholds: (thresholds?.[activeCode] as any) || null,
-            hazard: hazardBySite?.[location.siteId],
-          })
-        )
-      );
-
-      // Fetch in background and update when available
-      try {
-        const { attributes, latest } = await usgsService.getGaugeFullInfo(location.siteId);
-        if (!root) return; // closed
-        root.render(
-          React.createElement(TooltipProvider, null,
-            React.createElement(SitePopup, {
-              site: { siteId: location.siteId, name: location.name, coordinates: location.coordinates, siteType: location.siteType },
-              attributes: attributes || null,
-              latestFeatures: latest && latest.length > 0 ? latest : initialLatest,
-              activeCode,
-              thresholds: (thresholds?.[activeCode] as any) || null,
-              hazard: hazardBySite?.[location.siteId],
-            })
-          )
-        );
-      } catch (e) {
-        // keep initial render; optionally we could show error state
-      }
-    });
+marker.addListener('click', () => {
+  // Delegate selection to parent to handle drawer logic
+  onSiteSelect?.(location);
+});
 
     return marker;
-  }, [map, activeCodes, thresholds, hazardBySite]);
+  }, [map, activeCodes, thresholds, hazardBySite, onSiteSelect]);
 
   // Force redraw when active parameter changes
   useEffect(() => {

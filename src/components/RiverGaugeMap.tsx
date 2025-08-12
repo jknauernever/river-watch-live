@@ -18,6 +18,9 @@ import InfoPopover from '@/components/InfoPopover';
 import { DATASET_INFO_HTML } from '@/constants/datasetInfo';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
+import InfoDrawer from '@/components/InfoDrawer';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { SitePopup } from '@/components/SitePopup';
 
 
 
@@ -40,9 +43,12 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   const [renderMode, setRenderMode] = useState<'loading' | 'blocked' | 'markers' | 'countUnavailable'>('loading');
   const [datasetOpen, setDatasetOpen] = useState(true);
 
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [selectedSite, setSelectedSite] = useState<{ site: { siteId: string; name: string; coordinates: [number, number]; siteType?: string }, attributes: any | null, latestFeatures: any[] | null } | null>(null);
   
   // Parameter filtering and thresholds
   const [activeCodes, setActiveCodes] = useState<string[]>(['00060','00065']);
+  const activeCode = activeCodes[0] || '00065';
   const [thresholds, setThresholds] = useState<Record<string, any>>({});
   const [availableCodes, setAvailableCodes] = useState<Set<string>>(new Set());
   const [unitsByCode, setUnitsByCode] = useState<Record<string, string | undefined>>({});
