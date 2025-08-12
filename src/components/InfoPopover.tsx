@@ -5,7 +5,8 @@ export default function InfoPopover({
   title,
   html,
   side = "right",
-}: { title: string; html: string; side?: "top"|"right"|"bottom"|"left" }) {
+  maxWidth = 420,
+}: { title: string; html: string; side?: "top"|"right"|"bottom"|"left"; maxWidth?: number }) {
   const [open, setOpen] = useState(false);
 
   const toggle = (e: MouseEvent) => {
@@ -30,11 +31,13 @@ export default function InfoPopover({
         <div
           role="dialog"
           aria-label={`${title} info`}
-          className="z-50 absolute rounded-xl shadow-lg border bg-popover text-popover-foreground text-xs leading-snug max-w-[280px] p-3"
+          className="z-50 absolute rounded-xl shadow-lg border bg-popover text-popover-foreground text-xs leading-snug p-3 w-max"
           style={{
-            top: side==="bottom"? "1.5rem" : side==="top"? "-100%" : "50%",
-            left: side==="right"? "1.25rem" : side==="left"? "-290px" : "0",
-            transform: side==="top"||side==="bottom" ? "none" : "translateY(-50%)",
+            maxWidth,
+            top: side === "bottom" ? "1.75rem" : side === "top" ? "-100%" : "50%",
+            left: side === "right" ? "1.25rem" : side === "left" ? undefined : "0",
+            right: side === "left" ? "1.25rem" : undefined,
+            transform: side === "top" || side === "bottom" ? "none" : "translateY(-50%)",
           }}
           onMouseEnter={() => setOpen(true)}
           onMouseLeave={() => setOpen(false)}
