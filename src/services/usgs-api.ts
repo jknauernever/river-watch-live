@@ -1002,7 +1002,8 @@ export class USGSService {
     const out: any[] = [];
     while (next) {
       next = ensureApiKeyOnString(next);
-      const resp = await fetch(next, { signal, headers: { Accept: 'application/json' } });
+      // Use proxy/direct fallback to avoid CORS and transient issues
+      const resp = await fetchWithProxyFallback(next, { signal, headers: { Accept: 'application/json' } });
       if (!resp.ok) throw new Error(`USGS ${resp.status}`);
       const j = await resp.json();
       const feats = Array.isArray(j.features) ? j.features : [];
@@ -1020,9 +1021,9 @@ export class USGSService {
 
     // Use legacy Water Services for sub-daily instantaneous values (IV)
     const numeric = siteId.replace(/^USGS[:\-]?/i, '');
-    const buildIvUrl = (params: Record<string,string>) => {
+    const buildIvUrlFor = (pc: string, params: Record<string,string>) => {
       const u = new URL('https://waterservices.usgs.gov/nwis/iv/');
-      Object.entries({ format: 'json', sites: numeric, parameterCd: code, ...params }).forEach(([k,v]) => u.searchParams.set(k, v));
+      Object.entries({ format: 'json', sites: numeric, parameterCd: pc, ...params }).forEach(([k,v]) => u.searchParams.set(k, v));
       return u;
     };
 
@@ -1031,7 +1032,8 @@ export class USGSService {
       const points: { t:number; v:number }[] = [];
       for (const ts of tsArr) {
         const varCode = ts?.variable?.variableCode?.[0]?.value;
-        if (varCode !== code) continue;
+        // accept either requested code or turbidity alias 00076 when 63680 selected
+        if (varCode !== code && !(code === '63680' && varCode === '00076')) continue;
         const vals = ts?.values || [];
         for (const block of vals) {
           const arr = block?.value || [];
@@ -1046,34 +1048,72 @@ export class USGSService {
       return points;
     };
 
-    try {
-      // Primary: bounded by startDT/endDT
-      const url = buildIvUrl({ startDT: start.toISOString(), endDT: end.toISOString() });
-      console.info('[USGS] iv fetch', { siteId, numeric, code, start: start.toISOString(), end: end.toISOString() });
-      const resp = await fetch(url.toString(), { signal, headers: { Accept: 'application/json' } });
-      if (resp.ok) {
-        const j = await resp.json();
-        const pts = parseIvJson(j);
-        console.info('[USGS] iv points', pts.length);
-        if (pts.length > 0) { this.setCache(cacheKey, pts); return pts; }
+    const paramCodes = code === '63680' ? ['63680','00076'] : [code];
+    const msPerDay = 86400000;
+    const days = Math.max(1, Math.floor((end.getTime() - start.getTime()) / msPerDay));
+
+    // Chunk long ranges to respect IV API limits
+    if (days > 35) {
+      const pts: { t:number; v:number }[] = [];
+      try {
+        for (const pc of paramCodes) {
+          let segStart = new Date(start);
+          while (segStart.getTime() < end.getTime()) {
+            if (signal?.aborted) throw new DOMException('Aborted','AbortError');
+            const segEnd = new Date(Math.min(end.getTime(), segStart.getTime() + 30*msPerDay));
+            const url = buildIvUrlFor(pc, { startDT: segStart.toISOString(), endDT: segEnd.toISOString() });
+            const resp = await fetch(url.toString(), { signal, headers: { Accept: 'application/json' } });
+            if (resp.ok) {
+              const j = await resp.json();
+              const chunk = parseIvJson(j);
+              if (chunk.length) pts.push(...chunk);
+            }
+            // advance
+            segStart = new Date(segEnd.getTime() + msPerDay); // avoid overlap
+          }
+        }
+      } catch (e:any) {
+        if (e?.name === 'AbortError') throw e;
+        console.warn('IV chunked fetch failed', e);
       }
-    } catch (e:any) {
-      if (e?.name === 'AbortError') throw e;
-      console.warn('IV fetch failed, will try period fallback', e);
+      // de-dup and sort
+      if (pts.length > 0) {
+        const seen = new Set<number>();
+        const dedup: { t:number; v:number }[] = [];
+        for (const p of pts) { if (!seen.has(p.t)) { seen.add(p.t); dedup.push(p); } }
+        dedup.sort((a,b)=>a.t-b.t);
+        this.setCache(cacheKey, dedup);
+        return dedup;
+      }
     }
 
-    // Simple fallback using period duration if bounded query was empty
+    // Try bounded single request per code
+    for (const pc of paramCodes) {
+      try {
+        const url = buildIvUrlFor(pc, { startDT: start.toISOString(), endDT: end.toISOString() });
+        const resp = await fetch(url.toString(), { signal, headers: { Accept: 'application/json' } });
+        if (resp.ok) {
+          const j = await resp.json();
+          const pts = parseIvJson(j);
+          if (pts.length > 0) { this.setCache(cacheKey, pts); return pts; }
+        }
+      } catch (e:any) {
+        if (e?.name === 'AbortError') throw e;
+        // continue to next approach
+      }
+    }
+
+    // Simple period fallback for shorter ranges
     try {
-      const days = Math.max(1, Math.floor((end.getTime() - start.getTime()) / 86400000));
       const period = `P${days}D`;
-      const url2 = buildIvUrl({ period });
-      console.info('[USGS] iv fallback fetch', { siteId, numeric, code, period });
-      const resp2 = await fetch(url2.toString(), { signal, headers: { Accept: 'application/json' } });
-      if (resp2.ok) {
-        const j2 = await resp2.json();
-        const pts2 = parseIvJson(j2);
-        console.info('[USGS] iv fallback points', pts2.length);
-        if (pts2.length > 0) { this.setCache(cacheKey, pts2); return pts2; }
+      for (const pc of paramCodes) {
+        const url2 = buildIvUrlFor(pc, { period });
+        const resp2 = await fetch(url2.toString(), { signal, headers: { Accept: 'application/json' } });
+        if (resp2.ok) {
+          const j2 = await resp2.json();
+          const pts2 = parseIvJson(j2);
+          if (pts2.length > 0) { this.setCache(cacheKey, pts2); return pts2; }
+        }
       }
     } catch (e:any) {
       if (e?.name === 'AbortError') throw e;
@@ -1153,33 +1193,36 @@ export class USGSService {
       // 1) Prefer stable NWIS Daily Values (statCd=00003)
       try {
         const numeric = id.replace(/^USGS[:\-]?/i, '');
-        const dv = new URL('https://waterservices.usgs.gov/nwis/dv/');
-        dv.searchParams.set('format', 'json');
-        dv.searchParams.set('sites', numeric);
-        dv.searchParams.set('parameterCd', code);
-        dv.searchParams.set('statCd', '00003');
-        dv.searchParams.set('startDT', start.toISOString().slice(0,10));
-        dv.searchParams.set('endDT', end.toISOString().slice(0,10));
-        const resp = await fetch(dv.toString(), { signal, headers: { Accept: 'application/json' } });
-        if (resp.ok) {
-          const j = await resp.json();
-          const tsArr = j?.value?.timeSeries || [];
-          const out: { t:number; v:number }[] = [];
-          for (const ts of tsArr) {
-            const varCode = ts?.variable?.variableCode?.[0]?.value;
-            if (varCode !== code) continue;
-            const vals = ts?.values || [];
-            for (const block of vals) {
-              const arr = block?.value || [];
-              for (const it of arr) {
-                const t = Date.parse(it?.dateTime);
-                const v = Number(it?.value);
-                if (Number.isFinite(t) && Number.isFinite(v)) out.push({ t, v });
+        const paramCodes = code === '63680' ? ['63680','00076'] : [code];
+        for (const pc of paramCodes) {
+          const dv = new URL('https://waterservices.usgs.gov/nwis/dv/');
+          dv.searchParams.set('format', 'json');
+          dv.searchParams.set('sites', numeric);
+          dv.searchParams.set('parameterCd', pc);
+          dv.searchParams.set('statCd', '00003');
+          dv.searchParams.set('startDT', start.toISOString().slice(0,10));
+          dv.searchParams.set('endDT', end.toISOString().slice(0,10));
+          const resp = await fetch(dv.toString(), { signal, headers: { Accept: 'application/json' } });
+          if (resp.ok) {
+            const j = await resp.json();
+            const tsArr = j?.value?.timeSeries || [];
+            const out: { t:number; v:number }[] = [];
+            for (const ts of tsArr) {
+              const varCode = ts?.variable?.variableCode?.[0]?.value;
+              if (varCode !== pc) continue;
+              const vals = ts?.values || [];
+              for (const block of vals) {
+                const arr = block?.value || [];
+                for (const it of arr) {
+                  const t = Date.parse(it?.dateTime);
+                  const v = Number(it?.value);
+                  if (Number.isFinite(t) && Number.isFinite(v)) out.push({ t, v });
+                }
               }
             }
+            out.sort((a,b)=>a.t-b.t);
+            if (out.length > 0) { this.setCache(cacheKey, out); return out; }
           }
-          out.sort((a,b)=>a.t-b.t);
-          if (out.length > 0) { this.setCache(cacheKey, out); return out; }
         }
       } catch (_) { /* continue */ }
 
