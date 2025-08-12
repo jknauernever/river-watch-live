@@ -6,6 +6,7 @@ import { Droplets } from "lucide-react";
 
 const Index = () => {
   const [apiKey, setApiKey] = useState<string>("");
+  const [isCheckingKey, setIsCheckingKey] = useState<boolean>(true);
 
   useEffect(() => {
     const init = async () => {
@@ -44,6 +45,7 @@ const Index = () => {
       } catch {
         /* noop */
       }
+      setIsCheckingKey(false);
     };
     init();
   }, []);
@@ -69,7 +71,11 @@ const Index = () => {
 
       <main className="flex-1">
         <div className="container mx-auto p-4">
-          {apiKey ? (
+          {isCheckingKey ? (
+            <div className="h-[480px] rounded-lg border border-dashed border-border bg-muted/20 animate-pulse flex items-center justify-center text-muted-foreground">
+              Loading map…
+            </div>
+          ) : apiKey ? (
             <RiverGaugeMap apiKey={apiKey} />
           ) : (
             <GoogleMapsLoader onApiKeySet={(key) => setApiKey(key)} />
