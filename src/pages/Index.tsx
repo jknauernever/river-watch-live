@@ -48,14 +48,34 @@ const Index = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto p-4">
-        {apiKey ? (
-          <RiverGaugeMap apiKey={apiKey} />
-        ) : (
-          <GoogleMapsLoader onApiKeySet={(key) => setApiKey(key)} />
-        )}
-      </div>
+    <div className="min-h-screen bg-background flex flex-col">
+      <header className="w-full border-b border-border">
+        <div className="container mx-auto p-4">
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground">USGS Water Gage Data Viewer</h1>
+          <p className="mt-2 text-sm md:text-base text-muted-foreground max-w-3xl">
+            Interactive USGS map to explore real-time river gage height, discharge, and water-quality data near you, with color-coded markers and station details.
+          </p>
+          <p className="mt-1 text-xs md:text-sm text-muted-foreground">
+            This tool was created by <a href="https://KnauerNever.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">KnauerNever.com</a>.
+          </p>
+        </div>
+      </header>
+
+      <main className="flex-1">
+        <div className="container mx-auto p-4">
+          {apiKey ? (
+            <RiverGaugeMap apiKey={apiKey} />
+          ) : (
+            <GoogleMapsLoader onApiKeySet={(key) => setApiKey(key)} />
+          )}
+        </div>
+      </main>
+
+      <footer className="w-full border-t border-border">
+        <div className="container mx-auto p-4 text-xs md:text-sm text-muted-foreground">
+          © 2025 <a href="https://KnauerNever.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">KnauerNever.com</a>
+        </div>
+      </footer>
     </div>
   );
 };
