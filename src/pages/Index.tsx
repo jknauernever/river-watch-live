@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { RiverGaugeMap } from "@/components/RiverGaugeMap";
 import { GoogleMapsLoader } from "@/components/GoogleMapsLoader";
 import { supabase } from "@/integrations/supabase/client";
+import { Droplets } from "lucide-react";
 
 const Index = () => {
   const [apiKey, setApiKey] = useState<string>("");
@@ -50,9 +51,12 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="w-full border-b border-border">
-        <div className="container mx-auto p-4">
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground">USGS Water Gage Data Viewer</h1>
-          <p className="mt-2 text-sm md:text-base text-muted-foreground max-w-3xl">
+        <div className="container mx-auto p-6 text-center">
+          <div className="mx-auto mb-3 h-12 w-12 rounded-full border border-primary/20 bg-primary/10 flex items-center justify-center text-primary hover-scale animate-fade-in">
+            <Droplets className="h-6 w-6" aria-hidden="true" />
+          </div>
+          <h1 className="text-3xl md:text-4xl font-bold text-foreground">USGS Water Gage Data Viewer</h1>
+          <p className="mt-2 text-sm md:text-base text-muted-foreground max-w-3xl mx-auto">
             Interactive USGS map to explore real-time river gage height, discharge, and water-quality data near you, with color-coded markers and station details.
           </p>
           <p className="mt-1 text-xs md:text-sm text-muted-foreground">
@@ -72,7 +76,7 @@ const Index = () => {
       </main>
 
       <footer className="w-full border-t border-border">
-        <div className="container mx-auto p-4 text-xs md:text-sm text-muted-foreground">
+        <div className="container mx-auto p-4 text-center text-xs md:text-sm text-muted-foreground">
           © 2025 <a href="https://KnauerNever.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">KnauerNever.com</a>
         </div>
       </footer>
