@@ -52,10 +52,12 @@ const Index = () => {
     <div className="min-h-screen bg-background flex flex-col">
       <header className="w-full border-b border-border">
         <div className="container mx-auto p-6 text-center">
-          <div className="mx-auto mb-3 h-12 w-12 rounded-full border border-primary/20 bg-primary/10 flex items-center justify-center text-primary hover-scale animate-fade-in">
-            <Droplets className="h-6 w-6" aria-hidden="true" />
+          <div className="mx-auto mb-3 flex items-center justify-center gap-3">
+            <div className="h-12 w-12 rounded-full border border-primary/20 bg-primary/10 flex items-center justify-center text-primary hover-scale animate-fade-in">
+              <Droplets className="h-6 w-6" aria-hidden="true" />
+            </div>
+            <h1 className="text-3xl md:text-4xl font-bold text-foreground">USGS Water Gage Data Viewer</h1>
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold text-foreground">USGS Water Gage Data Viewer</h1>
           <p className="mt-2 text-sm md:text-base text-muted-foreground max-w-3xl mx-auto">
             Interactive USGS map to explore real-time river gage height, discharge, and water-quality data near you, with color-coded markers and station details.
           </p>
