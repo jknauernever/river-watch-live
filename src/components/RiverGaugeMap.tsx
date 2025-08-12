@@ -14,6 +14,8 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { DATASETS, DatasetKey, PARAM_LABEL, COLOR_BY_CODE, computeThresholds, legendTicks } from '@/lib/datasets';
+import InfoPopover from '@/components/InfoPopover';
+import { DATASET_INFO_HTML } from '@/constants/datasetInfo';
 
 
 
@@ -437,7 +439,10 @@ const th: Record<string, any> = t
                       return (
                         <div key={name} className="flex items-center gap-2 py-1">
                           <RadioGroupItem id={id} value={name} disabled={disabled} />
-                          <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>{name}</Label>
+                          <div className="flex items-center">
+                            <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>{name}</Label>
+                            <InfoPopover title={name} html={DATASET_INFO_HTML[name] || "No description yet."} side="right" />
+                          </div>
                         </div>
                       );
                     })}
@@ -519,7 +524,10 @@ const th: Record<string, any> = t
                   return (
                     <div key={name} className="flex items-center gap-2 py-1">
                       <RadioGroupItem id={id} value={name} disabled={disabled} />
-                      <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>{name}</Label>
+                      <div className="flex items-center">
+                        <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>{name}</Label>
+                        <InfoPopover title={name} html={DATASET_INFO_HTML[name] || "No description yet."} side="right" />
+                      </div>
                     </div>
                   );
                 })}
