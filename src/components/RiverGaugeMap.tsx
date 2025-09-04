@@ -1,16 +1,28 @@
 /// <reference types="google.maps" />
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { GaugeStation } from '@/types/usgs';
+
 import { usgsService } from '@/services/usgs-api';
-import { usgsRateLimiter } from '@/services/rate-limiter';
+
 import { useGoogleMaps } from '@/hooks/useGoogleMaps';
 import { MapContainer } from '@/components/MapContainer';
 import { GaugeMarkers } from '@/components/GaugeMarkers';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, RotateCcw, Droplets, AlertCircle } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { Loader2, RotateCcw, ChevronDown } from 'lucide-react';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { DATASETS, DatasetKey, PARAM_LABEL, COLOR_BY_CODE, computeThresholds, legendTicks } from '@/lib/datasets';
+import InfoPopover from '@/components/InfoPopover';
+import { DATASET_INFO_HTML } from '@/constants/datasetInfo';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { cn } from '@/lib/utils';
+import InfoDrawer from '@/components/InfoDrawer';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { SitePopup } from '@/components/SitePopup';
+
+
 
 interface RiverGaugeMapProps {
   apiKey: string;
@@ -21,23 +33,85 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
   
   const { map, isLoaded, error: mapError, resetView, loadPlacesLibrary } = useGoogleMaps({ apiKey });
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingData, setIsLoadingData] = useState(false);
+  
   const [fetchProgress, setFetchProgress] = useState<{ fetched: number; total?: number } | null>(null);
-  const [stations, setStations] = useState<GaugeStation[]>([]);
+  
   const [basicGaugeLocations, setBasicGaugeLocations] = useState<any[]>([]);
-  const [selectedStation, setSelectedStation] = useState<GaugeStation | null>(null);
-  const [showRiverData, setShowRiverData] = useState(false);
-  const [showValues, setShowValues] = useState(false);
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
   const [tooManyInExtent, setTooManyInExtent] = useState<null | { total: number }>(null);
   const [countUnavailable, setCountUnavailable] = useState(false);
   const [renderMode, setRenderMode] = useState<'loading' | 'blocked' | 'markers' | 'countUnavailable'>('loading');
-  const [rateLimitStatus, setRateLimitStatus] = useState<{ isLimited: boolean; message: string; retryAfter?: number } | null>(null);
+  const [datasetOpen, setDatasetOpen] = useState(true);
+
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [selectedSite, setSelectedSite] = useState<{ site: { siteId: string; name: string; coordinates: [number, number]; siteType?: string }, attributes: any | null, latestFeatures: any[] | null } | null>(null);
+
+  const handleSiteSelect = useCallback((siteBasic: { siteId: string; name: string; coordinates: [number, number]; siteType?: string; params?: Array<{ code: string; value: number; unit?: string; time?: string; label?: string }> }) => {
+    const latestFeatures = (siteBasic.params || []).map((p) => ({
+      type: 'Feature',
+      properties: {
+        parameter_code: p.code,
+        parameter_name: p.label,
+        value: String(p.value),
+        unit_of_measure: p.unit,
+        time: p.time,
+        monitoring_location_id: `USGS-${siteBasic.siteId}`,
+      },
+    }));
+
+    setSelectedSite({
+      site: { siteId: siteBasic.siteId, name: siteBasic.name, coordinates: siteBasic.coordinates, siteType: siteBasic.siteType },
+      attributes: null,
+      latestFeatures,
+    });
+    setInfoOpen(true);
+  }, []);
+
+  // Parameter filtering and thresholds
+  const [activeCodes, setActiveCodes] = useState<string[]>(['00060','00065']);
+  const activeCode = activeCodes[0] || '00065';
+  const [thresholds, setThresholds] = useState<Record<string, any>>({});
+  const [availableCodes, setAvailableCodes] = useState<Set<string>>(new Set());
+  const [unitsByCode, setUnitsByCode] = useState<Record<string, string | undefined>>({});
+  const availabilityTimerRef = useRef<number | null>(null);
+  const availabilityCacheRef = useRef<Map<string, { timestamp: number; result: Record<DatasetKey, boolean> }>>(new Map());
+  
   const requestIdRef = useRef(0);
   const [debugInfo, setDebugInfo] = useState<{ bbox: [number, number, number, number]; preflight?: { numberReturned?: number; elapsedMs?: number; exceeds?: boolean }; full?: { total: number; pages: number; elapsedMs: number; capped: boolean } | null; running: boolean; match?: { stations: number; matched: number } } | null>(null);
   const preflightPendingRef = useRef(false);
-  const { toast } = useToast();
+  
   const searchInitializedRef = useRef(false);
+
+  type DatasetKey =
+    | 'Gage height' | 'Discharge' | 'Water temperature' | 'pH'
+    | 'Dissolved oxygen' | 'NO3+NO2 (as N)' | 'Turbidity'
+    | 'Susp. sediment conc' | 'Specific conductance';
+
+  const DATASETS: Record<DatasetKey, string[]> = {
+    'Gage height': ['00065'],
+    'Discharge': ['00060'],
+    'Water temperature': ['00010'],
+    'pH': ['00400'],
+    'Dissolved oxygen': ['00300'],
+    'NO3+NO2 (as N)': ['99133'],
+    'Turbidity': ['63680'],
+    'Susp. sediment conc': ['80154'],
+    'Specific conductance': ['00095'],
+  };
+  const DEFAULT_DATASET: DatasetKey = 'Gage height';
+
+  const [selectedDataset, setSelectedDataset] = useState<DatasetKey>(DEFAULT_DATASET);
+  const [datasetAvailability, setDatasetAvailability] = useState<Record<DatasetKey, boolean>>({
+    'Gage height': true,
+    'Discharge': true,
+    'Water temperature': true,
+    'pH': true,
+    'Dissolved oxygen': true,
+    'NO3+NO2 (as N)': true,
+    'Turbidity': true,
+    'Susp. sediment conc': true,
+    'Specific conductance': true,
+  });
 
   const handleSearchFocus = useCallback(async () => {
     if (searchInitializedRef.current) return;
@@ -60,9 +134,60 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     }
   }, [loadPlacesLibrary, map]);
 
+  // Check availability of each dataset within the bbox (debounced + cached)
+  const updateDatasetAvailability = useCallback(async (bbox: [number, number, number, number], signal?: AbortSignal) => {
+    try {
+      const key = bbox.join(',');
+      const ttl = 30_000; // 30s
+      const cached = availabilityCacheRef.current.get(key);
+      if (cached && Date.now() - cached.timestamp < ttl) {
+        setDatasetAvailability(prev => ({ ...prev, ...cached.result }));
+        if (!cached.result[selectedDataset]) {
+          const firstEnabled = (Object.keys(DATASETS) as DatasetKey[]).find(k => cached.result[k]);
+          if (firstEnabled && firstEnabled !== selectedDataset) setSelectedDataset(firstEnabled);
+        }
+        return;
+      }
+
+      const entries = Object.entries(DATASETS) as [DatasetKey, string[]][];
+      const results = await Promise.all(entries.map(async ([name, codes]) => {
+        if (signal?.aborted) return [name, false] as const;
+        try {
+          const m = await usgsService.fetchBulkGaugeData(bbox, { parameterCodes: codes, limit: 1, signal });
+          return [name, m.size > 0] as const;
+        } catch {
+          return [name, false] as const;
+        }
+      }));
+
+      if (signal?.aborted) return;
+      const resultObj: Record<DatasetKey, boolean> = {} as any;
+      results.forEach(([name, ok]) => { (resultObj as any)[name] = ok; });
+
+      availabilityCacheRef.current.set(key, { timestamp: Date.now(), result: resultObj });
+      setDatasetAvailability(prev => ({ ...prev, ...resultObj }));
+      if (!resultObj[selectedDataset]) {
+        const firstEnabled = (Object.keys(DATASETS) as DatasetKey[]).find(k => resultObj[k]);
+        if (firstEnabled && firstEnabled !== selectedDataset) setSelectedDataset(firstEnabled);
+      }
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      console.warn('updateDatasetAvailability failed', e);
+    }
+  }, [selectedDataset]);
+
+  const updateDatasetAvailabilityDebounced = useCallback((bbox: [number, number, number, number], signal?: AbortSignal) => {
+    if (availabilityTimerRef.current) {
+      clearTimeout(availabilityTimerRef.current as any);
+    }
+    availabilityTimerRef.current = window.setTimeout(() => {
+      updateDatasetAvailability(bbox, signal);
+    }, 800);
+  }, [updateDatasetAvailability]);
+
   // Load gauge locations (progressive, abortable) when map bounds change
   const loadGaugeLocations = useCallback(async () => {
-    if (!map || isLoading) return;
+    if (!map) return;
 
     const bounds = map.getBounds();
     if (!bounds) {
@@ -90,223 +215,124 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     setCountUnavailable(false);
     setRenderMode('loading');
     setBasicGaugeLocations([]);
-    setStations([]);
     const myRequestId = ++requestIdRef.current;
     // Cancel any in-flight request
     (loadGaugeLocations as any).abortController?.abort?.();
     const abortController = new AbortController();
     (loadGaugeLocations as any).abortController = abortController;
     console.log('Starting gauge location load for bbox:', bbox);
-    try {
-      const LIMIT = 500;
-      // Definitive threshold check with limit=1001, with a timeout
-      let decided = false;
-      const controller = new AbortController();
-      const timer = setTimeout(() => {
-        if (!decided) {
-          if (requestIdRef.current !== myRequestId) return;
-          // keep gate when count is slow/unavailable
-          setCountUnavailable(true);
-          setRenderMode('countUnavailable');
-        }
-        controller.abort();
-      }, 15000);
-
-      let total: number | null = null;
-      let proceedWithMarkers = false;
       try {
-        const t0 = Date.now();
-        const { total: t, exceedsThreshold } = await usgsService.fetchMonitoringLocationsCount(bbox, controller.signal, LIMIT);
-        clearTimeout(timer);
-        {
-          setDebugInfo(prev => ({ ...(prev || { bbox }), bbox, preflight: { numberReturned: t ?? undefined, elapsedMs: Date.now() - t0, exceeds: exceedsThreshold }, full: prev?.full ?? null, running: false }));
-        }
-        if (exceedsThreshold) {
-          if (requestIdRef.current !== myRequestId) return;
-          setTooManyInExtent({ total: 1001 });
-          setRenderMode('blocked');
-          decided = true;
-        } else {
-          total = t ?? 0;
-          if (requestIdRef.current !== myRequestId) return;
-          proceedWithMarkers = true;
-          setRenderMode('markers');
-          setTooManyInExtent(null);
-          setCountUnavailable(false);
-          decided = true;
-        }
-      } catch (e) {
-        clearTimeout(timer);
-        // Preflight failed: proceed with capped markers but show count-unavailable banner
-        if (requestIdRef.current !== myRequestId) return;
-        setCountUnavailable(true);
-        setRenderMode('countUnavailable');
-        proceedWithMarkers = true;
-      }
+        // Only show sites with recent data for selected parameters
+        setRenderMode('markers');
+        setTooManyInExtent(null);
+        setCountUnavailable(false);
+        setFetchProgress({ fetched: 0, total: undefined });
 
-      if (!proceedWithMarkers) return; // gated: no markers when definitively exceeded
+        // Update dataset availability in the background (debounced)
+        updateDatasetAvailabilityDebounced(bbox, abortController.signal);
 
-      // Proceed to fetch locations; results will be capped via maxFeatures when needed
-      const locations = await usgsService.getGaugeLocationsOnly(bbox, {
-        onProgress: (fetched, total) => {
-          setFetchProgress({ fetched, total });
-        },
-        onPage: (features) => {
-          const valid = features.map((f: any) => ({
-            id: f.id || f.properties?.monitoring_location_number,
-            name: f.properties?.monitoring_location_name || `Site ${f.properties?.monitoring_location_number}`,
-            siteId: f.properties?.monitoring_location_number,
-            coordinates: (f.geometry?.coordinates || f.properties?.coordinates) as [number, number],
-            siteType: f.properties?.site_type_cd || f.properties?.site_type_code || 'ST',
-            isDemo: false,
-          })).filter((l: any) => Array.isArray(l.coordinates) && l.coordinates.length === 2);
-          // Deduplicate by siteId while streaming pages
-          setBasicGaugeLocations(prev => {
-            const map = new Map<string, any>(prev.map(p => [p.siteId, p]));
-            for (const v of valid) {
-              map.set(v.siteId, v);
+        const codes = DATASETS[selectedDataset];
+        const bulkMap = await usgsService.fetchBulkGaugeData(bbox, {
+          parameterCodes: codes,
+          limit: 10000,
+          signal: abortController.signal,
+        });
+
+        type Site = {
+          id: string; name: string; siteId: string; coordinates: [number, number]; siteType: string; isDemo: boolean;
+          params: Array<{ code: string; value: number; unit?: string; time?: string; label?: string }>;
+        };
+
+        const featuresBySite = new Map<string, Site>();
+        const units: Record<string, string | undefined> = {};
+        const presentCodes = new Set<string>();
+
+        for (const feature of bulkMap.values()) {
+          const f: any = feature as any;
+          const props = f?.properties || {};
+          const code: string | undefined = props.parameter_code || props.observed_property_code;
+          if (!code) continue;
+          presentCodes.add(code);
+
+          let id: string = String(
+            props.monitoring_location_number || props.monitoring_location_id || props.monitoring_location_identifier || f.id || props.site_no || ''
+          ).replace(/^USGS[:\-]?/i, '');
+          if (!id) continue;
+
+          const coords = Array.isArray(f?.geometry?.coordinates) ? (f.geometry.coordinates as [number, number]) : null;
+          if (!coords) continue;
+          const [lng, lat] = coords;
+          if (typeof lng !== 'number' || typeof lat !== 'number') continue;
+          if (isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) continue;
+
+          let value = Number(props.value ?? props.result);
+          if (!Number.isFinite(value)) continue;
+          let unit = props.unit || props.unit_of_measurement || props.unit_of_measure || undefined;
+          const time = props.time || props.datetime || props.result_time || undefined;
+          const label = props.parameter_name || props.observed_property_name || undefined;
+
+          // Normalize stage (00065) to feet
+          if (code === '00065') {
+            const u = (unit || '').toLowerCase();
+            if (u === 'm' || u === 'meter' || u === 'metre' || u === 'meters') { value = value * 3.28084; unit = 'ft'; }
+            else if (u === 'cm' || u === 'centimeter' || u === 'centimeters') { value = value / 30.48; unit = 'ft'; }
+            else if (u === 'mm' || u === 'millimeter' || u === 'millimeters') { value = value / 304.8; unit = 'ft'; }
+            else if (!u) {
+              if (value > 200 && value < 20000) { value = value / 30.48; unit = 'ft'; }
             }
-            return Array.from(map.values());
-          });
-        },
-        signal: abortController.signal,
-        maxFeatures: 500,
-      });
-      console.log('Received locations:', locations);
-      
-      // Filter out any locations with invalid coordinates
-      const validLocations = locations.filter(location => {
-        const [lng, lat] = location.coordinates;
-        if (typeof lng !== 'number' || typeof lat !== 'number' || 
-            isNaN(lng) || isNaN(lat) || 
-            lng < -180 || lng > 180 || lat < -90 || lat > 90) {
-          console.warn('Filtering out invalid location:', location.name, location.coordinates);
-          return false;
-        }
-        return true;
-      });
+          }
 
-      console.log(`Filtered ${validLocations.length} valid locations from ${locations.length} total`);
-      setBasicGaugeLocations(validLocations);
-      setIsUsingDemoData(false);
-      console.log(`Loaded ${validLocations.length} gauge locations, isDemo: ${validLocations.length > 0 && validLocations[0].isDemo}`);
+          if (unit && !units[code]) units[code] = unit;
 
-      // Auto-enhance: fetch latest heights to color markers
-      try {
-        setIsLoadingData(true);
-        const mapBounds = map.getBounds();
-        if (mapBounds) {
-          const ne2 = mapBounds.getNorthEast();
-          const sw2 = mapBounds.getSouthWest();
-          const bbox2: [number, number, number, number] = [sw2.lng(), sw2.lat(), ne2.lng(), ne2.lat()];
-          const enhancedStations = await usgsService.enhanceGaugeStationsWithData(validLocations, bbox2);
-          setStations(enhancedStations);
-          // Update debug with match stats
-          setDebugInfo(prev => {
-            const matched = enhancedStations.filter(s => typeof s.latestHeight === 'number').length;
-            return { ...(prev || { bbox: bbox2, running: false }), match: { stations: enhancedStations.length, matched } };
-          });
+          const existing = featuresBySite.get(id);
+          if (!existing) {
+            featuresBySite.set(id, {
+              id,
+              name: props.monitoring_location_name || `Site ${id}`,
+              siteId: id,
+              coordinates: [lng, lat],
+              siteType: props.site_type_code || 'ST',
+              isDemo: false,
+              params: [{ code, value, unit, time, label }],
+            });
+          } else {
+            existing.params.push({ code, value, unit, time, label });
+          }
         }
-      } catch (enhanceErr) {
-        console.warn('Auto-enhance water data failed:', enhanceErr);
+
+        // Build thresholds for the single active code
+        const code = codes[0];
+        const values: number[] = [];
+        for (const site of featuresBySite.values()) {
+          const p = site.params.find(x => x.code === code);
+          if (p && Number.isFinite(p.value)) values.push(p.value);
+        }
+const t = computeThresholds(values);
+const th: Record<string, any> = t
+  ? { [code]: { q33: t.q33, q66: t.q66, q90: t.q90, min: t.min, max: t.max } }
+  : {};
+
+        const sites = Array.from(featuresBySite.values());
+        setBasicGaugeLocations(sites);
+        setThresholds(th);
+        setAvailableCodes(presentCodes);
+        setUnitsByCode(units);
+        setIsUsingDemoData(false);
+        console.log(`Loaded ${sites.length} sites with recent data in view across ${Array.from(presentCodes).join(', ')}`);
+      } catch (error) {
+        console.error('Error loading gauge locations:', error);
       } finally {
-        setIsLoadingData(false);
+        setIsLoading(false);
+        setFetchProgress(null);
+        if ((loadGaugeLocations as any).abortController === abortController) {
+          (loadGaugeLocations as any).abortController = null;
+        }
       }
-    } catch (error) {
-      console.error('Error loading gauge locations:', error);
-    } finally {
-      setIsLoading(false);
-      setFetchProgress(null);
-      if ((loadGaugeLocations as any).abortController === abortController) {
-        (loadGaugeLocations as any).abortController = null;
-      }
-    }
-  }, [map, isLoading]);
+   }, [map, selectedDataset]);
 
   // Monitor rate limiting status
-  const updateRateLimitStatus = useCallback(() => {
-    const status = usgsRateLimiter.getStatus();
-    if (status.queueLength > 0 || status.requestCount >= status.maxRequestsPerMinute * 0.8) {
-      setRateLimitStatus({
-        isLimited: true,
-        message: `API requests: ${status.requestCount}/${status.maxRequestsPerMinute} per minute`,
-        retryAfter: status.queueLength > 0 ? Math.ceil(status.queueLength * 3) : undefined
-      });
-    } else {
-      setRateLimitStatus(null);
-    }
-  }, []);
 
   // Load enhanced station data when requested
-  const loadStations = useCallback(async () => {
-    if (!showRiverData || basicGaugeLocations.length === 0 || isLoadingData || !map) return;
-    
-    // Get current map bounds for bulk API optimization
-    const bounds = map.getBounds();
-    if (!bounds) return;
-
-    const ne = bounds.getNorthEast();
-    const sw = bounds.getSouthWest();
-    const bbox: [number, number, number, number] = [
-      sw.lng(), sw.lat(), ne.lng(), ne.lat()
-    ];
-    
-    setIsLoadingData(true);
-    setRateLimitStatus(null); // Clear any previous rate limit status
-    
-    console.log('Loading water data for stations:', {
-      count: basicGaugeLocations.length,
-      bbox: bbox,
-      sampleStations: basicGaugeLocations.slice(0, 3).map(s => ({ name: s.name, siteId: s.siteId }))
-    });
-    
-    try {
-      const enhancedStations = await usgsService.enhanceGaugeStationsWithData(basicGaugeLocations, bbox);
-      console.log('Enhanced stations received:', {
-        total: enhancedStations.length,
-        withHeight: enhancedStations.filter(s => typeof s.latestHeight === 'number').length,
-        sample: enhancedStations.slice(0, 3).map(s => ({
-          name: s.name,
-          siteId: s.siteId,
-          hasHeight: typeof s.latestHeight === 'number',
-          height: s.latestHeight
-        }))
-      });
-      
-      setStations(enhancedStations);
-      updateRateLimitStatus();
-
-      toast({
-        title: "Water Data Loaded",
-        description: `Enhanced ${enhancedStations.length} gauges with current water levels`,
-      });
-    } catch (error: any) {
-      console.error('Error loading water data:', error);
-      
-      // Handle rate limiting specifically
-      if (error.status === 429 || error.message?.includes('429')) {
-        setRateLimitStatus({
-          isLimited: true,
-          message: "Rate limit exceeded. Please wait before retrying.",
-          retryAfter: 60
-        });
-        
-        toast({
-          title: "Rate Limited",
-          description: "Too many requests. Please wait a moment before trying again.",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Error Loading Water Data",
-          description: "Failed to load current water levels. Please try again.",
-          variant: "destructive",
-        });
-      }
-    } finally {
-      setIsLoadingData(false);
-    }
-  }, [showRiverData, basicGaugeLocations, isLoadingData, map, toast, updateRateLimitStatus]);
 
   // Set up map listeners once when map is loaded
   useEffect(() => {
@@ -336,34 +362,31 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
     };
   }, [map, isLoaded, loadGaugeLocations]);
 
-  const toggleRiverData = useCallback(() => {
-    console.log('toggleRiverData called, current showRiverData:', showRiverData);
-    setShowRiverData(prev => {
-      const newValue = !prev;
-      console.log('Setting showRiverData from', prev, 'to', newValue);
-      return newValue;
-    });
-  }, [showRiverData]);
-
-  // Load stations when showRiverData becomes true
+  // Sync active codes to selected dataset
   useEffect(() => {
-    if (showRiverData && basicGaugeLocations.length > 0 && map && !isLoadingData) {
-      console.log('showRiverData changed to true, loading stations...');
-      loadStations();
-    } else if (!showRiverData) {
-      console.log('showRiverData changed to false, clearing stations...');
-      setStations([]);
-      setSelectedStation(null);
-    }
-  }, [showRiverData, basicGaugeLocations.length, map, isLoadingData, loadStations]);
+    setActiveCodes(DATASETS[selectedDataset]);
+  }, [selectedDataset]);
+
+  // Re-fetch on dataset change
+  useEffect(() => {
+    if (!map || !isLoaded) return;
+    loadGaugeLocations();
+  }, [selectedDataset, map, isLoaded, loadGaugeLocations]);
+
+  // Resize map when drawer toggles to avoid white space
+  useEffect(() => {
+    if (!map || !window.google) return;
+    const id = window.setTimeout(() => {
+      try {
+        window.google.maps.event.trigger(map, 'resize');
+        const c = map.getCenter();
+        if (c) map.setCenter(c);
+      } catch {}
+    }, 250);
+    return () => window.clearTimeout(id);
+  }, [infoOpen, map]);
 
   // Periodically update rate limit status
-  useEffect(() => {
-    if (!showRiverData) return;
-    
-    const interval = setInterval(updateRateLimitStatus, 5000); // Update every 5 seconds
-    return () => clearInterval(interval);
-  }, [showRiverData, updateRateLimitStatus]);
 
   const getUSGSApiKey = useCallback(() => {
     try {
@@ -405,273 +428,290 @@ export const RiverGaugeMap = ({ apiKey }: RiverGaugeMapProps) => {
 
   return (
     <div className="relative w-full h-screen bg-background">
-      {/* Map Container */}
-      <MapContainer />
-      
-      {/* Markers Component */}
-      {basicGaugeLocations.length > 0 && (
-        <GaugeMarkers 
-          map={map}
-          basicLocations={basicGaugeLocations}
-          stations={stations}
-          showRiverData={showRiverData}
-          showValues={showValues}
-          onStationSelect={setSelectedStation}
-        />
-      )}
+      <div className="flex h-full w-full">
+        {/* Map area */}
+        <div className="relative flex-1">
+          {/* Map Container */}
+          <MapContainer />
 
-      {/* Header */}
-      <div className="absolute top-4 left-4 right-4 z-10 flex gap-3 items-center pointer-events-none">
-        <Card className="flex-1 max-w-md pointer-events-auto">
-          <CardContent className="p-3">
-            <input
-              id="search-input"
-              type="text"
-              placeholder="Search for a location..."
-              onFocus={handleSearchFocus}
-              className="w-full border-0 outline-none bg-transparent text-foreground placeholder:text-muted-foreground"
+          {/* Loading overlay to prevent white screen */}
+          {!isLoaded && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="rounded-md bg-background/80 backdrop-blur-sm px-3 py-2 text-sm">
+                Loading map…
+              </div>
+            </div>
+          )}
+
+          {/* Markers */}
+          {basicGaugeLocations.length > 0 && (
+            <GaugeMarkers
+              map={map}
+              basicLocations={basicGaugeLocations}
+              activeCodes={activeCodes}
+              thresholds={thresholds}
+              onSiteSelect={handleSiteSelect}
             />
-          </CardContent>
-        </Card>
-        
-        <Button 
-          onClick={toggleRiverData} 
-          variant={showRiverData ? "default" : "outline"} 
-          size="sm"
-          disabled={basicGaugeLocations.length === 0}
-          className="pointer-events-auto"
-        >
-          <Droplets className="w-4 h-4 mr-2" />
-          {showRiverData ? "Hide" : "Show"} Water Data
-        </Button>
+          )}
+          
+          {/* Header: search + mobile dataset trigger */}
+          <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
+            <Card className="flex-1 max-w-md pointer-events-auto">
+              <CardContent className="p-3">
+                <input
+                  id="search-input"
+                  type="text"
+                  placeholder="Search for a location..."
+                  onFocus={handleSearchFocus}
+                  className="w-full border-0 outline-none bg-transparent text-foreground placeholder:text-muted-foreground"
+                />
+              </CardContent>
+            </Card>
 
-        <Button 
-          onClick={() => setShowValues(v => !v)}
-          variant={showValues ? "default" : "outline"}
-          size="sm"
-          disabled={!showRiverData}
-          className="pointer-events-auto"
-        >
-          {showValues ? 'Hide' : 'Show'} Values
-        </Button>
-        
-        <Button onClick={resetView} variant="secondary" size="sm" className="pointer-events-auto">
-          <RotateCcw className="w-4 h-4 mr-2" />
-          Reset
-        </Button>
+            {/* Mobile: Dataset drawer trigger */}
+            <div className="ml-3 md:hidden pointer-events-auto">
+              <Sheet>
+                <SheetTrigger asChild>
+                  <Button variant="outline" size="sm">Dataset</Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-72 p-0">
+                  <div className="p-4 space-y-4">
+                    <div>
+                      <div className="text-sm font-semibold mb-2">Dataset</div>
+                      <RadioGroup value={selectedDataset} onValueChange={(v) => setSelectedDataset(v as any)}>
+                        {(Object.keys(DATASETS) as DatasetKey[]).map((name) => {
+                          const code = DATASETS[name][0];
+                          const id = `ds-mobile-${code}`;
+                          const disabled = datasetAvailability[name] === false;
+                          return (
+                            <div key={name} className="flex items-center gap-2 py-1">
+                              <RadioGroupItem id={id} value={name} disabled={disabled} />
+                              <div className="flex items-center">
+                                <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>{name}</Label>
+                                <InfoPopover title={name} html={DATASET_INFO_HTML[name] || "No description yet."} side="right" />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </RadioGroup>
+                    </div>
 
-        {rateLimitStatus && (
-          <Button 
-            onClick={() => {
-              usgsService.clearRateLimiterQueue();
-              setRateLimitStatus(null);
-              toast({
-                title: "Rate Limiter Reset",
-                description: "API request queue cleared. You can try again.",
-              });
-            }} 
-            variant="destructive" 
-            size="sm" 
-            className="pointer-events-auto"
-          >
-            Clear Queue
-          </Button>
-        )}
-      </div>
+                    {/* Legend (compact) */}
+                    <div>
+                      <div className="text-sm font-semibold mb-2">Legend</div>
+                      <div className="text-sm mb-1">{PARAM_LABEL[DATASETS[selectedDataset][0]] || selectedDataset}</div>
+                      {(() => {
+                        const code = DATASETS[selectedDataset][0];
+                        if (code === '00065') {
+                          const colors = (COLOR_BY_CODE['00065']?.colors as any) || {};
+                          return (
+                            <div className="w-48">
+                              <div className="grid grid-cols-2 gap-1 items-center">
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.low }} />
+                                  <span className="text-xs">Low</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.med }} />
+                                  <span className="text-xs">Med</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.high }} />
+                                  <span className="text-xs">High</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.extreme || colors.high }} />
+                                  <span className="text-xs">Extreme</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                        const colors = COLOR_BY_CODE[code]?.colors || { low:'#d4f0ff', med:'#4a90e2', high:'#08306b' };
+                        const gradient = `linear-gradient(to right, ${colors.low}, ${colors.med}, ${colors.high})`;
+                        const t = thresholds[code];
+                        const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
+                        return (
+                          <>
+                            <div className="h-2 rounded w-48" style={{ background: gradient }} />
+                            {t ? (
+                              <div className="mt-1 text-xs text-muted-foreground">{legendTicks({ min:t.min, q33:t.q33, q66:t.q66, max:t.max }, unit)}</div>
+                            ) : null}
+                          </>
+                        );
+                      })()}
+                    
+                    </div>
 
-      {/* Rate Limiting Status */}
-      {rateLimitStatus && (
-        <div className="absolute top-20 left-4 z-20 pointer-events-none">
-          <Card className="pointer-events-auto border-orange-200 bg-orange-50">
-            <CardContent className="p-3 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-orange-600" />
-              <div className="text-sm">
-                <div className="font-medium text-orange-800">{rateLimitStatus.message}</div>
-                {rateLimitStatus.retryAfter && (
-                  <div className="text-orange-600">Retry in ~{rateLimitStatus.retryAfter}s</div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+                    {/* Status */}
+                    <div aria-live="polite" className="text-xs text-muted-foreground">
+                      {basicGaugeLocations.length > 0
+                        ? `${basicGaugeLocations.length} gauges in view`
+                        : `No gauges with latest ${selectedDataset} in view.`}
+                    </div>
 
-      {/* Demo Data Warning */}
-      {isUsingDemoData && (
-        <div className="absolute top-4 right-4 z-20 pointer-events-none">
-          <div className="bg-red-600 text-white px-3 py-2 rounded-md shadow-lg font-bold text-sm pointer-events-auto">
-            Warning: Demo Data
-          </div>
-        </div>
-      )}
-
-      {/* Loading indicator */}
-      {(isLoading || isLoadingData) && renderMode === 'loading' && (
-        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
-          <Card className="pointer-events-auto">
-            <CardContent className="p-3 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-sm">
-                {isLoading
-                  ? fetchProgress
-                    ? `Fetching gauges${fetchProgress.total ? `: ${fetchProgress.fetched} of ${fetchProgress.total}` : `: ${fetchProgress.fetched}...`}`
-                    : 'Fetching gauges...'
-                  : 'Loading water level data...'}
-              </span>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Too many markers notice */}
-      {renderMode === 'blocked' && tooManyInExtent && (
-        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
-          <Card className="pointer-events-auto">
-            <CardContent className="p-3">
-              <div className="text-sm">Zoom in closer to see markers.</div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Count unavailable notice */}
-      {countUnavailable && (
-        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
-          <Card className="pointer-events-auto">
-            <CardContent className="p-3">
-              <div className="text-sm">Gauge count is currently unavailable. Zoom in closer or try again.</div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Debug overlay (always visible for now) */}
-      <div className="absolute left-4 z-10 pointer-events-none" style={{ top: '88px' }}>
-          <Card className="pointer-events-auto">
-            <CardContent className="p-3 space-y-2">
-              <div className="text-xs font-mono">
-                <div>BBox: {JSON.stringify(debugInfo?.bbox || [])}</div>
-                <div>Preflight: {debugInfo?.preflight ? `${debugInfo.preflight.numberReturned ?? 'n/a'} in ${debugInfo.preflight.elapsedMs}ms (exceeds=${debugInfo.preflight.exceeds ? 'yes' : 'no'})` : 'n/a'}</div>
-                <div>Full Count: {debugInfo?.full ? `${debugInfo.full.total} in ${debugInfo.full.pages} pages (${debugInfo.full.elapsedMs}ms)${debugInfo.full.capped ? ' [capped]' : ''}` : debugInfo?.running ? 'running…' : '—'}</div>
-                <div>State: mode={renderMode}, markers={basicGaugeLocations.length}, stations={stations.length}</div>
-                {debugInfo?.match ? (
-                  <div className="flex items-center gap-2">
-                    <span>Heights matched: {debugInfo.match.matched} of {debugInfo.match.stations}</span>
-                    <Button size="icon" variant="ghost" onClick={() => {
-                      try {
-                        const unmatched = stations.filter(s => typeof s.latestHeight !== 'number').map(s => s.siteId || s.id);
-                        navigator.clipboard.writeText(JSON.stringify({ unmatched }, null, 2));
-                      } catch {}
-                    }}>Copy unmatched</Button>
                   </div>
-                ) : null}
-                <div>Fetch URL: <button className="underline" onClick={() => {
-                  try {
-                    const ne = map?.getBounds?.()?.getNorthEast();
-                    const sw = map?.getBounds?.()?.getSouthWest();
-                    if (!ne || !sw) return;
-                    const round = (v: number) => Math.round(v * 1000) / 1000;
-                    const b = [round(sw.lng()), round(sw.lat()), round(ne.lng()), round(ne.lat())] as [number, number, number, number];
-                    const url = new URL('https://api.waterdata.usgs.gov/ogcapi/v0/collections/monitoring-locations/items');
-                    url.searchParams.set('bbox', b.join(','));
-                    url.searchParams.set('limit', '500');
-                    url.searchParams.set('f', 'json');
-                    url.searchParams.set('filter-lang', 'cql-text');
-                    url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
-                    const k = getUSGSApiKey();
-                    if (k) url.searchParams.set('apikey', k);
-                    window.open(url.toString(), '_blank', 'noopener');
-                  } catch {}
-                }}>open</button></div>
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={async () => {
-                  try {
-                    const bounds = map?.getBounds?.();
-                    const b = bounds ? (() => {
-                      const ne = bounds.getNorthEast();
-                      const sw = bounds.getSouthWest();
-                      const round = (v: number) => Math.round(v * 1000) / 1000;
-                      return [round(sw.lng()), round(sw.lat()), round(ne.lng()), round(ne.lat())] as [number, number, number, number];
-                    })() : (debugInfo?.bbox || [0,0,0,0] as any);
-                    setDebugInfo(prev => ({ ...(prev || { bbox: b }), bbox: b, running: true }));
-                    const controller = new AbortController();
-                    const result = await usgsService.fetchMonitoringLocationsFullCount(b, { signal: controller.signal, onProgress: () => {} });
-                    setDebugInfo(prev => ({ ...(prev || { bbox: b }), bbox: b, preflight: prev?.preflight, full: result, running: false }));
-                  } catch (e) {
-                    setDebugInfo(prev => ({ ...(prev || ({} as any)), running: false }));
-                  }
-                }}>Run full count</Button>
-                <Button size="sm" variant="ghost" onClick={() => { try { navigator.clipboard.writeText(JSON.stringify(debugInfo, null, 2)); } catch {} }}>Copy</Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    try {
-                      const bounds = map?.getBounds?.();
-                      if (!bounds) return;
-                      const ne = bounds.getNorthEast();
-                      const sw = bounds.getSouthWest();
-                      const round = (v: number) => Math.round(v * 1000) / 1000;
-                      const b = [round(sw.lng()), round(sw.lat()), round(ne.lng()), round(ne.lat())] as [number, number, number, number];
-                      const url = new URL('https://api.waterdata.usgs.gov/ogcapi/v0/collections/monitoring-locations/items');
-                      url.searchParams.set('bbox', b.join(','));
-                      url.searchParams.set('limit', '501');
-                      url.searchParams.set('f', 'json');
-                      url.searchParams.set('filter-lang', 'cql-text');
-                      url.searchParams.set('filter', "site_type_code IN ('ST','ST-TS','ST-DCH','LK','ES','OC')");
-                      const k = getUSGSApiKey();
-                      if (k) url.searchParams.set('apikey', k);
-                      window.open(url.toString(), '_blank', 'noopener');
-                    } catch {}
-                  }}
-                >
-                  Open preflight URL
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-      </div>
-
-      {/* Legend */}
-      {showRiverData && (
-        <Card className="absolute bottom-4 left-4 z-10">
-          <CardContent className="p-3">
-            <div className="flex items-center gap-1 mb-2">
-              <Droplets className="w-4 h-4 text-primary" />
-              <span className="text-sm font-medium">Water Levels</span>
+                </SheetContent>
+              </Sheet>
             </div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full bg-water-low"></div>
-                <span>Low (&lt; 2 ft)</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full bg-water-medium"></div>
-                <span>Medium (2-5 ft)</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full bg-water-high"></div>
-                <span>High (5-10 ft)</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full bg-water-critical"></div>
-                <span>Critical (&gt; 10 ft)</span>
+
+          </div>
+
+          {/* Desktop left sidebar */}
+          <div className={`hidden md:block absolute top-24 left-4 z-10 pointer-events-none ${datasetOpen ? 'w-64' : 'w-28'}`}>
+            <Card className="pointer-events-auto">
+              <CardContent className="p-4">
+                <Collapsible open={datasetOpen} onOpenChange={setDatasetOpen}>
+                  <CollapsibleTrigger asChild>
+                    <button className="flex w-full items-center justify-between text-sm font-semibold py-1">
+                      <span>Dataset</span>
+                      <ChevronDown className={cn("h-4 w-4 transition-transform", datasetOpen ? "rotate-180" : "rotate-0")} aria-hidden="true" />
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-4 pt-2">
+                    <div>
+                      <RadioGroup value={selectedDataset} onValueChange={(v) => setSelectedDataset(v as any)}>
+                        {(Object.keys(DATASETS) as DatasetKey[]).map((name) => {
+                          const code = DATASETS[name][0];
+                          const id = `ds-${code}`;
+                          const disabled = datasetAvailability[name] === false;
+                          return (
+                            <div key={name} className="flex items-center gap-2 py-1">
+                              <RadioGroupItem id={id} value={name} disabled={disabled} />
+                              <div className="flex items-center">
+                                <Label htmlFor={id} className={disabled ? 'text-muted-foreground' : ''}>{name}</Label>
+                                <InfoPopover title={name} html={DATASET_INFO_HTML[name] || "No description yet."} side="right" />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </RadioGroup>
+                    </div>
+
+                    {/* Legend (compact) */}
+                    <div>
+                      <div className="text-sm font-semibold mb-2">Legend</div>
+                      <div className="text-sm mb-1">{PARAM_LABEL[DATASETS[selectedDataset][0]] || selectedDataset}</div>
+                      {(() => {
+                        const code = DATASETS[selectedDataset][0];
+                        if (code === '00065') {
+                          const colors = (COLOR_BY_CODE['00065']?.colors as any) || {};
+                          return (
+                            <div className="w-48">
+                              <div className="grid grid-cols-2 gap-1 items-center">
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.low }} />
+                                  <span className="text-xs">Low</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.med }} />
+                                  <span className="text-xs">Med</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.high }} />
+                                  <span className="text-xs">High</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colors.extreme || colors.high }} />
+                                  <span className="text-xs">Extreme</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                        const colors = COLOR_BY_CODE[code]?.colors || { low:'#d4f0ff', med:'#4a90e2', high:'#08306b' };
+                        const gradient = `linear-gradient(to right, ${colors.low}, ${colors.med}, ${colors.high})`;
+                        const t = thresholds[code];
+                        const unit = unitsByCode[code] ? ` ${unitsByCode[code]}` : '';
+                        return (
+                          <>
+                            <div className="h-2 rounded w-48" style={{ background: gradient }} />
+                            {t ? (
+                              <div className="mt-1 text-xs text-muted-foreground">{legendTicks({ min:t.min, q33:t.q33, q66:t.q66, max:t.max }, unit)}</div>
+                            ) : null}
+                          </>
+                        );
+                      })()}
+
+                    </div>
+
+                    {/* Status */}
+                    <div aria-live="polite" className="text-xs text-muted-foreground">
+                      {basicGaugeLocations.length > 0
+                        ? `${basicGaugeLocations.length} gauges in view`
+                        : `No gauges with latest ${selectedDataset} in view.`}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Rate Limiting Status */}
+
+          {/* Demo Data Warning */}
+          {isUsingDemoData && (
+            <div className="absolute top-4 right-4 z-20 pointer-events-none">
+              <div className="bg-red-600 text-white px-3 py-2 rounded-md shadow-lg font-bold text-sm pointer-events-auto">
+                Warning: Demo Data
               </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          )}
 
-      {/* Gauge count - always show when locations are loaded */}
-      {renderMode === 'markers' && basicGaugeLocations.length > 0 && (
-        <div className="absolute bottom-4 right-4 z-10 pointer-events-none">
-          <Badge variant="secondary">
-            {basicGaugeLocations.length} gauge{basicGaugeLocations.length !== 1 ? 's' : ''} in view
-            {showRiverData && stations.length > 0 && ` • ${stations.length} with data`}
-          </Badge>
+          {/* Loading indicator */}
+          {isLoading && renderMode === 'loading' && (
+            <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
+              <Card className="pointer-events-auto">
+                <CardContent className="p-3 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-sm">
+                    {fetchProgress
+                      ? `Fetching gauges${fetchProgress.total ? `: ${fetchProgress.fetched} of ${fetchProgress.total}` : `: ${fetchProgress.fetched}...`}`
+                      : 'Fetching gauges...'}
+                  </span>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Too many markers notice */}
+          {renderMode === 'blocked' && tooManyInExtent && (
+            <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
+              <Card className="pointer-events-auto">
+                <CardContent className="p-3">
+                  <div className="text-sm">Zoom in closer to see markers.</div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Count unavailable notice */}
+          {countUnavailable && (
+            <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
+              <Card className="pointer-events-auto">
+                <CardContent className="p-3">
+                  <div className="text-sm">Gauge count is currently unavailable. Zoom in closer or try again.</div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Right info drawer (takes layout space, no overlay) */}
+        <InfoDrawer open={infoOpen} onOpenChange={setInfoOpen} hasSelection={!!selectedSite}>
+          {selectedSite ? (
+            <div className="p-4">
+              <SitePopup
+                site={selectedSite.site}
+                attributes={selectedSite.attributes}
+                latestFeatures={selectedSite.latestFeatures || []}
+                activeCode={activeCode}
+                thresholds={(thresholds as any)[activeCode] || null}
+              />
+            </div>
+          ) : undefined}
+        </InfoDrawer>
+      </div>
     </div>
   );
 };

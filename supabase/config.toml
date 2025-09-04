@@ -2,3 +2,9 @@ project_id = "lcebfbqjwgwgmwajujwq"
 
 [functions.get-google-maps-key]
 verify_jwt = false
+
+[functions.get-usgs-api-key]
+verify_jwt = true
+
+[functions.usgs-proxy]
+verify_jwt = false

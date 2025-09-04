@@ -6,6 +6,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { ChevronDown, ChevronRight, Database, Loader2, Minimize2, Maximize2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import InfoPopover from "@/components/InfoPopover";
+import { DATASET_INFO_HTML } from "@/constants/datasetInfo";
 
 interface Dataset {
   id: string;
@@ -216,7 +218,10 @@ export const DatasetSelector: React.FC<DatasetSelectorProps> = ({
                     onClick={() => handleDatasetSelect(dataset)}
                   >
                     <div className="flex flex-col items-start gap-1">
-                      <span className="font-medium">{dataset.name}</span>
+                      <div className="flex items-center">
+                        <span className="font-medium">{dataset.name}</span>
+                        <InfoPopover title={dataset.name} html={DATASET_INFO_HTML[dataset.name] || "No description yet."} side="right" />
+                      </div>
                       {dataset.description && (
                         <span className="text-xs opacity-70 line-clamp-2">
                           {dataset.description}

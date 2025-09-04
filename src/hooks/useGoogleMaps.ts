@@ -40,6 +40,12 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
             resolve(window.google);
           }
         }, 100);
+        // Safety timeout to avoid hanging forever
+        setTimeout(() => {
+          if (window.google && window.google.maps && window.google.maps.Map) {
+            resolve(window.google);
+          }
+        }, 10000);
         return;
       }
 
@@ -52,21 +58,46 @@ export const useGoogleMaps = ({ apiKey, containerId = 'map-container' }: UseGoog
       }
 
       const script = document.createElement('script');
+      // Keep callback for compatibility but also rely on onload to avoid ad-blocker quirks
       script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&v=weekly&loading=async&callback=initGoogleMaps`;
       script.async = true;
       script.defer = true;
-      
-      window.initGoogleMaps = () => {
+
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
         console.log('Google Maps loaded successfully');
         resolve(window.google);
       };
-      
+
+      window.initGoogleMaps = () => {
+        // Callback path
+        if (window.google?.maps?.Map) settle();
+      };
+
+      script.onload = () => {
+        // onload path (works even if callback suppressed by blockers)
+        if (window.google?.maps?.Map) settle();
+      };
+
+      const timeoutId = setTimeout(() => {
+        if (window.google?.maps?.Map) {
+          settle();
+        } else {
+          console.error('Google Maps script load timed out');
+          scriptLoadedRef.current = false;
+          reject(new Error('Google Maps failed to load (timeout)'));
+        }
+      }, 12000);
+
       script.onerror = (event) => {
         console.error('Google Maps script failed to load:', event);
         scriptLoadedRef.current = false;
+        clearTimeout(timeoutId);
         reject(new Error('Failed to load Google Maps'));
       };
-      
+
       document.head.appendChild(script);
     });
   }, [apiKey]);

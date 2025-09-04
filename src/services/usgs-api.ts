@@ -1,5 +1,6 @@
 import { USGSMonitoringLocation, USGSLatestValue, GaugeStation, WaterLevel, USGSHistoricalData } from '@/types/usgs';
 import { usgsRateLimiter } from './rate-limiter';
+import { FUNCTIONS_URL } from '@/integrations/supabase/urls';
 
 const USGS_BASE_URL = 'https://api.waterdata.usgs.gov/ogcapi/v0';
 const ENV_USGS_API_KEY: string = (import.meta as any)?.env?.VITE_USGS_API_KEY ?? '';
@@ -13,9 +14,32 @@ function getUSGSApiKey(): string {
   }
 }
 
+function shouldUseProxy(): boolean {
+  // Always prefer proxy; client toggle removed. Fallback logic handles failures.
+  return true;
+}
+
+function ensureProxyUrl(url: URL): URL {
+  // Prefer routing via Supabase edge proxy unless user disabled it
+  if (!shouldUseProxy()) {
+    // Optionally inject API key client-side only if provided (not required)
+    const key = getUSGSApiKey();
+    if (key && !url.searchParams.has('api_key')) {
+      url.searchParams.set('api_key', key);
+    }
+    return url;
+  }
+  const proxied = new URL(`${FUNCTIONS_URL}/usgs-proxy`);
+  proxied.searchParams.set('upstream', url.toString());
+  return proxied;
+}
+
 function ensureApiKey(url: URL): URL {
+  // Inject API key on the upstream URL only; proxying is handled at fetch time
   const key = getUSGSApiKey();
-  if (key && !url.searchParams.has('apikey')) url.searchParams.set('apikey', key);
+  if (key && !url.searchParams.has('api_key')) {
+    url.searchParams.set('api_key', key);
+  }
   return url;
 }
 
@@ -23,10 +47,72 @@ function ensureApiKeyOnString(urlString: string | null): string | null {
   if (!urlString) return null;
   try {
     const u = new URL(urlString);
-    return ensureApiKey(u).toString();
+    const key = getUSGSApiKey();
+    if (key && !u.searchParams.has('api_key')) {
+      u.searchParams.set('api_key', key);
+    }
+    return u.toString();
   } catch {
     return urlString;
   }
+}
+
+async function fetchWithProxyFallback(urlString: string, init?: RequestInit): Promise<Response> {
+  // Try proxy first (default), then direct upstream; or the opposite if proxy is disabled
+  const tryProxyFirst = shouldUseProxy();
+  const headers = new Headers(init?.headers || { Accept: 'application/json' });
+
+  const toUpstream = (s: string): URL => {
+    try {
+      const u = new URL(s);
+      // If already pointing at proxy, extract upstream param
+      const isProxy = u.origin + u.pathname === `${FUNCTIONS_URL}/usgs-proxy`;
+      if (isProxy) {
+        const upstreamParam = u.searchParams.get('upstream');
+        if (upstreamParam) return new URL(upstreamParam);
+      }
+      return u;
+    } catch {
+      return new URL(urlString);
+    }
+  };
+
+  const upstream = toUpstream(urlString);
+  const makeProxyUrl = () => {
+    const u = new URL(`${FUNCTIONS_URL}/usgs-proxy`);
+    u.searchParams.set('upstream', upstream.toString());
+    return u.toString();
+  };
+  const makeDirectUrl = () => {
+    const u = new URL(upstream.toString());
+    const key = getUSGSApiKey();
+    if (key && !u.searchParams.has('api_key')) u.searchParams.set('api_key', key);
+    return u.toString();
+  };
+
+  const tryFetch = async (url: string) => fetch(url, { ...init, headers });
+
+  const sequences = tryProxyFirst
+    ? [makeProxyUrl(), makeDirectUrl()]
+    : [makeDirectUrl(), makeProxyUrl()];
+
+  let lastErr: any;
+  for (const u of sequences) {
+    try {
+      const resp = await tryFetch(u);
+      if (resp.ok) return resp;
+      // consider retrying next variant for 5xx or 0
+      if (resp.status >= 500 || resp.status === 0 || resp.status === 429) {
+        lastErr = new Error(`HTTP ${resp.status}`);
+        continue;
+      }
+      return resp; // for 4xx other than 429, just return
+    } catch (e) {
+      lastErr = e;
+      continue;
+    }
+  }
+  throw lastErr || new Error('Fetch failed');
 }
 
 // Calculate water level based on gage height value
@@ -45,7 +131,7 @@ function calculateWaterLevel(value: number): WaterLevel {
 
 export class USGSService {
   private cache = new Map<string, any>();
-  private cacheTimeout = 5 * 60 * 1000; // 5 minutes
+  private cacheTimeout = 60 * 1000; // 60 seconds for time-series and fetch caches
   private requestQueue = new Map<string, Promise<any>>();
 
   /**
@@ -275,8 +361,8 @@ export class USGSService {
           let attempts = 0;
           let resp: Response | null = null;
           while (attempts < 4) {
-            nextUrl = ensureApiKeyOnString(nextUrl);
-            resp = await fetch(nextUrl!, { signal: options?.signal });
+            // nextUrl may be an upstream or proxied URL; wrapper will handle proxy/direct and fallback
+            resp = await fetchWithProxyFallback(nextUrl!, { signal: options?.signal, headers: { Accept: 'application/json' } });
             if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
               const retryAfter = Number(resp.headers.get('retry-after'));
               const delayMs = !isNaN(retryAfter) ? retryAfter * 1000 : 500 * Math.pow(2, attempts);
@@ -505,7 +591,7 @@ export class USGSService {
     console.log(`Fetching latest value for site: ${siteId}`);
     
     try {
-      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`));
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous/items`));
       url.searchParams.set('monitoring_location_id', siteId);
       url.searchParams.set('parameter_code', '00065');
       url.searchParams.set('f', 'json');
@@ -523,11 +609,26 @@ export class USGSService {
         return resp;
       });
       
-      const data = await response.json();
+      let data = await response.json();
       console.log(`Individual API response for ${siteId}:`, {
         totalFeatures: data.features?.length || 0,
         features: data.features
       });
+      
+      // If no features returned, try prefixed form (USGS-<id>) once
+      if ((!data.features || data.features.length === 0) && !/^USGS[:\-]/i.test(siteId)) {
+        const altId = `USGS-${siteId.replace(/^USGS[:\-]?/i, '')}`;
+        const altUrl = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous/items`));
+        altUrl.searchParams.set('monitoring_location_id', altId);
+        altUrl.searchParams.set('parameter_code', '00065');
+        altUrl.searchParams.set('f', 'json');
+        console.log(`No features for ${siteId}; retrying with prefixed ID: ${altId}`);
+        const altResp = await fetch(altUrl.toString());
+        if (altResp.ok) {
+          data = await altResp.json();
+          console.log(`Alt response for ${altId}:`, { totalFeatures: data.features?.length || 0 });
+        }
+      }
       
       // Find gage height data (parameter code 00065)
       const gageHeightData = data.features?.find((feature: any) => 
@@ -548,36 +649,111 @@ export class USGSService {
     }
   }
 
+  // Fetch full site attributes from monitoring locations
+  async fetchSiteDetails(siteId: string): Promise<Record<string, any> | null> {
+    try {
+      const numeric = siteId.replace(/^USGS[:\-]?/i, '');
+      const tryQueries = [
+        { field: 'monitoring_location_number', value: numeric },
+        { field: 'monitoring_location_id', value: `USGS-${numeric}` },
+      ];
+      for (const q of tryQueries) {
+        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/monitoring-locations/items`));
+        url.searchParams.set('f', 'json');
+        url.searchParams.set('limit', '1');
+        url.searchParams.set('filter-lang', 'cql-text');
+        url.searchParams.set('filter', `${q.field}='${q.value}'`);
+        const resp = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        const feature = Array.isArray(data.features) ? data.features[0] : null;
+        if (feature?.properties) return feature.properties;
+      }
+      return null;
+    } catch (e) {
+      console.warn('fetchSiteDetails failed for', siteId, e);
+      return null;
+    }
+  }
+
+  // Fetch all latest measurements for a site (all parameter codes)
+  async fetchLatestAllParameters(siteId: string): Promise<any[]> {
+    try {
+      const numeric = siteId.replace(/^USGS[:\-]?/i, '');
+      const idsToTry = [siteId, `USGS-${numeric}`, `USGS:${numeric}`, numeric];
+      for (const id of idsToTry) {
+        const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous/items`));
+        url.searchParams.set('monitoring_location_id', id);
+        url.searchParams.set('f', 'json');
+        url.searchParams.set('limit', '1000');
+        const resp = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        const feats = Array.isArray(data.features) ? data.features : [];
+        if (feats.length > 0) return feats;
+      }
+      return [];
+    } catch (e) {
+      console.warn('fetchLatestAllParameters failed for', siteId, e);
+      return [];
+    }
+  }
+
+  // Convenience: fetch attributes and latest measurements together
+  async getGaugeFullInfo(siteId: string): Promise<{ attributes: Record<string, any> | null; latest: any[] }>{
+    const [attributes, latest] = await Promise.all([
+      this.fetchSiteDetails(siteId),
+      this.fetchLatestAllParameters(siteId),
+    ]);
+    return { attributes, latest };
+  }
+
   // NEW: Efficient bulk fetch of gauge data for multiple sites in a bbox
-  async fetchBulkGaugeData(bbox: [number, number, number, number]): Promise<Map<string, USGSLatestValue>> {
-    const cacheKey = `bulk-gauge-${bbox.join(',')}`;
+  async fetchBulkGaugeData(
+    bbox: [number, number, number, number],
+    options?: { parameterCodes?: string[]; limit?: number; signal?: AbortSignal }
+  ): Promise<Map<string, USGSLatestValue>> {
+    const codes = options?.parameterCodes && options.parameterCodes.length > 0 ? options.parameterCodes : ['00065'];
+    const limit = options?.limit ?? 1000;
+    const cacheKey = `bulk-gauge-${bbox.join(',')}-${codes.join('+')}-${limit}`;
     const cached = this.getCached<Map<string, USGSLatestValue>>(cacheKey);
     if (cached) return cached;
 
-    console.log('Fetching bulk gauge data for bbox:', bbox);
+    console.log('Fetching bulk gauge data for bbox:', bbox, 'codes:', codes);
     
     try {
-      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous-values/items`));
+      const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/latest-continuous/items`));
       
-      // Get all gauge height data in the bbox in one request
+      // Clip by bbox and request JSON
       url.searchParams.set('bbox', bbox.join(','));
-      url.searchParams.set('parameter_code', '00065'); // Gage height only
       url.searchParams.set('f', 'json');
-      url.searchParams.set('limit', '1000');
-      // API key ensured above
+      url.searchParams.set('limit', String(limit));
+
+      // Filter by parameter codes (supports single or multiple)
+      if (codes.length === 1) {
+        url.searchParams.set('parameter_code', codes[0]);
+      } else if (codes.length > 1) {
+        url.searchParams.set('filter-lang', 'cql-text');
+        const quoted = codes.map((c) => `'${c}'`).join(',');
+        url.searchParams.set('filter', `parameter_code IN (${quoted})`);
+      }
 
       console.log('Making bulk gauge data request to:', url.toString());
       
-      // Use rate limiter for bulk requests
-      const response = await usgsRateLimiter.executeWithRetry(async () => {
-        const resp = await fetch(url.toString());
+      // Use rate limiter for large requests; bypass for tiny pre-checks (limit <= 1)
+      const useLimiter = (options?.limit ?? 1000) > 1;
+      const fetchOnce = async () => {
+        const resp = await fetchWithProxyFallback(url.toString(), { headers: { Accept: 'application/json' }, signal: options?.signal });
         if (!resp.ok) {
           const error = new Error(`HTTP ${resp.status}: ${resp.statusText}`);
           (error as any).status = resp.status;
           throw error;
         }
         return resp;
-      });
+      };
+      const response = useLimiter
+        ? await usgsRateLimiter.executeWithRetry(fetchOnce)
+        : await fetchOnce();
 
       const data = await response.json();
       console.log('Bulk gauge data response:', {
@@ -591,79 +767,56 @@ export class USGSService {
       const addWithAliases = (id: string, value: USGSLatestValue) => {
         if (!id || typeof id !== 'string') return;
         
-        console.log(`Processing ID: "${id}" for station`);
-        
         // Raw id
         if (!gaugeDataMap.has(id)) {
           gaugeDataMap.set(id, value);
-          console.log(`  Added raw ID: "${id}"`);
         }
         
         // Numeric-only variant (strip agency prefixes like 'USGS-' or 'USGS:')
         const numeric = id.replace(/^USGS[:\-]?/i, '');
         if (numeric !== id && !gaugeDataMap.has(numeric)) {
           gaugeDataMap.set(numeric, value);
-          console.log(`  Added numeric ID: "${numeric}"`);
         }
         
         // Explicit prefixed forms
         const dash = `USGS-${numeric}`;
         if (!gaugeDataMap.has(dash)) {
           gaugeDataMap.set(dash, value);
-          console.log(`  Added dash ID: "${dash}"`);
         }
         
         const colon = `USGS:${numeric}`;
         if (!gaugeDataMap.has(colon)) {
           gaugeDataMap.set(colon, value);
-          console.log(`  Added colon ID: "${colon}"`);
         }
         
         // Additional variations for better matching
         const cleanNumeric = numeric.replace(/[^0-9]/g, '');
         if (cleanNumeric !== numeric && !gaugeDataMap.has(cleanNumeric)) {
           gaugeDataMap.set(cleanNumeric, value);
-          console.log(`  Added clean numeric ID: "${cleanNumeric}"`);
         }
       };
 
-      data.features?.forEach((feature: any, index: number) => {
-        if (feature?.properties?.parameter_code !== '00065') return;
-        
-        const props = feature.properties || {};
-        console.log(`Feature ${index}:`, {
-          id: feature.id,
-          props: {
-            monitoring_location_id: props.monitoring_location_id,
-            monitoring_location_identifier: props.monitoring_location_identifier,
-            monitoring_location_number: props.monitoring_location_number,
-            site_no: props.site_no,
-            parameter_code: props.parameter_code,
-            value: props.value
-          }
-        });
-        
+      data.features?.forEach((feature: any) => {
+        const props = feature?.properties || {};
         const candidates: Array<string | undefined> = [
+          props.monitoring_location_number,
           props.monitoring_location_id,
           props.monitoring_location_identifier,
-          props.monitoring_location_number,
-          feature.id,
+          feature?.id,
           props.site_no,
         ];
-        
         const first = candidates.find((v) => typeof v === 'string' && v.length > 0);
-        if (first) {
-          addWithAliases(String(first), feature);
-        } else {
-          console.warn(`No valid ID found for feature ${index}:`, feature);
-        }
+        if (first) addWithAliases(String(first), feature);
       });
       
-      console.log(`Bulk fetch returned gauge data for ${gaugeDataMap.size} locations`);
-      console.log('Available IDs in map:', Array.from(gaugeDataMap.keys()));
+      console.log(`Bulk fetch built ${gaugeDataMap.size} keyed entries (includes ID aliases)`);
       this.setCache(cacheKey, gaugeDataMap);
       return gaugeDataMap;
     } catch (error) {
+      if ((error as any)?.name === 'AbortError') {
+        console.warn('Bulk gauge data request aborted');
+        return new Map();
+      }
       console.error('Error fetching bulk gauge data:', error);
       return new Map();
     }
@@ -714,7 +867,10 @@ export class USGSService {
           console.log(`  ✗ No match found for station ${station.name} (${station.siteId})`);
         }
         
-        const height = latestValue?.properties?.value;
+        // Coerce value to a number (API may return a string)
+        const rawValue: any = (latestValue as any)?.properties?.value as any;
+        const parsed = typeof rawValue === 'number' ? rawValue : (rawValue != null ? parseFloat(String(rawValue)) : NaN);
+        const height = Number.isFinite(parsed) ? parsed : undefined;
         const waterLevel: WaterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
         
         return {
@@ -724,7 +880,7 @@ export class USGSService {
           coordinates: station.coordinates,
           latestHeight: height,
           waterLevel,
-          lastUpdated: latestValue?.properties?.datetime,
+          lastUpdated: (latestValue as any)?.properties?.time || (latestValue as any)?.properties?.datetime,
         };
       });
 
@@ -745,14 +901,16 @@ export class USGSService {
             const siteId = stations[idx].siteId;
             console.log(`Fetching individual data for site: ${siteId}`);
             const latest = await this.fetchLatestValue(siteId);
-            const height = latest?.properties?.value;
+            const rawValue: any = (latest as any)?.properties?.value as any;
+            const parsed = typeof rawValue === 'number' ? rawValue : (rawValue != null ? parseFloat(String(rawValue)) : NaN);
+            const height = Number.isFinite(parsed) ? parsed : undefined;
             if (typeof height === 'number') {
               console.log(`  ✓ Got height ${height} for ${siteId}`);
               stations[idx] = {
                 ...stations[idx],
                 latestHeight: height,
                 waterLevel: calculateWaterLevel(height),
-                lastUpdated: latest?.properties?.datetime,
+                lastUpdated: (latest as any)?.properties?.time || (latest as any)?.properties?.datetime,
               };
             } else {
               console.log(`  ✗ No height data for ${siteId}`);
@@ -788,7 +946,9 @@ export class USGSService {
         const latestValue = await this.fetchLatestValue(station.siteId);
         console.log(`Latest value for ${station.siteId}:`, latestValue);
         
-        const height = latestValue?.properties?.value;
+        const rawValue: any = (latestValue as any)?.properties?.value as any;
+        const parsed = typeof rawValue === 'number' ? rawValue : (rawValue != null ? parseFloat(String(rawValue)) : NaN);
+        const height = Number.isFinite(parsed) ? parsed : undefined;
         const waterLevel: WaterLevel = typeof height === 'number' ? calculateWaterLevel(height) : { value: NaN, level: 'low', color: '#4285f4' };
         console.log(`Station ${station.siteId}: height=${height}, waterLevel=`, waterLevel);
 
@@ -799,7 +959,7 @@ export class USGSService {
           coordinates: station.coordinates,
           latestHeight: height,
           waterLevel,
-          lastUpdated: latestValue?.properties?.datetime,
+          lastUpdated: (latestValue as any)?.properties?.time || (latestValue as any)?.properties?.datetime,
         };
       });
 
@@ -826,6 +986,295 @@ export class USGSService {
     return this.enhanceGaugeStationsWithData(basicStations, bbox); // Pass bbox for bulk optimization
   }
 
+  // Helpers for time series endpoints
+  private normalizeIds(siteId: string): string[] {
+    const numeric = siteId.replace(/^USGS[:\-]?/i, '');
+    const variants = [`USGS-${numeric}`, `USGS:${numeric}`, numeric];
+    return Array.from(new Set(variants));
+  }
+  private async fetchPaged(url: string, signal?: AbortSignal): Promise<any[]> {
+    let next: string | null = url;
+    const out: any[] = [];
+    while (next) {
+      next = ensureApiKeyOnString(next);
+      // Use proxy/direct fallback to avoid CORS and transient issues
+      const resp = await fetchWithProxyFallback(next, { signal, headers: { Accept: 'application/json' } });
+      if (!resp.ok) throw new Error(`USGS ${resp.status}`);
+      const j = await resp.json();
+      const feats = Array.isArray(j.features) ? j.features : [];
+      out.push(...feats);
+      const nxt = Array.isArray(j.links) ? j.links.find((l: any) => l.rel === 'next' && typeof l.href === 'string') : null;
+      next = nxt?.href || null;
+    }
+    return out;
+  }
+
+  async fetchObservationsSeries(siteId: string, code: string, start: Date, end: Date, signal?: AbortSignal): Promise<{ t:number; v:number }[]> {
+    const cacheKey = `obs-${siteId}-${code}-${start.toISOString()}-${end.toISOString()}`;
+    const cached = this.getCached<{ t:number; v:number }[]>(cacheKey);
+    if (cached) return cached;
+
+    // Use legacy Water Services for sub-daily instantaneous values (IV)
+    const numeric = siteId.replace(/^USGS[:\-]?/i, '');
+    const buildIvUrlFor = (pc: string, params: Record<string,string>) => {
+      const u = new URL('https://waterservices.usgs.gov/nwis/iv/');
+      Object.entries({ format: 'json', sites: numeric, parameterCd: pc, ...params }).forEach(([k,v]) => u.searchParams.set(k, v));
+      return u;
+    };
+
+    const parseIvJson = (j: any) => {
+      const tsArr = j?.value?.timeSeries || [];
+      const points: { t:number; v:number }[] = [];
+      for (const ts of tsArr) {
+        const varCode = ts?.variable?.variableCode?.[0]?.value;
+        // accept either requested code or turbidity alias 00076 when 63680 selected
+        if (varCode !== code && !(code === '63680' && varCode === '00076')) continue;
+        const vals = ts?.values || [];
+        for (const block of vals) {
+          const arr = block?.value || [];
+          for (const it of arr) {
+            const t = Date.parse(it?.dateTime);
+            const v = Number(it?.value);
+            if (Number.isFinite(t) && Number.isFinite(v)) points.push({ t, v });
+          }
+        }
+      }
+      points.sort((a,b)=>a.t-b.t);
+      return points;
+    };
+
+    const paramCodes = code === '63680' ? ['63680','00076'] : [code];
+    const msPerDay = 86400000;
+    const days = Math.max(1, Math.floor((end.getTime() - start.getTime()) / msPerDay));
+
+    // Chunk long ranges to respect IV API limits
+    if (days > 35) {
+      const pts: { t:number; v:number }[] = [];
+      try {
+        for (const pc of paramCodes) {
+          let segStart = new Date(start);
+          while (segStart.getTime() < end.getTime()) {
+            if (signal?.aborted) throw new DOMException('Aborted','AbortError');
+            const segEnd = new Date(Math.min(end.getTime(), segStart.getTime() + 30*msPerDay));
+            const url = buildIvUrlFor(pc, { startDT: segStart.toISOString(), endDT: segEnd.toISOString() });
+            const resp = await fetch(url.toString(), { signal, headers: { Accept: 'application/json' } });
+            if (resp.ok) {
+              const j = await resp.json();
+              const chunk = parseIvJson(j);
+              if (chunk.length) pts.push(...chunk);
+            }
+            // advance
+            segStart = new Date(segEnd.getTime() + msPerDay); // avoid overlap
+          }
+        }
+      } catch (e:any) {
+        if (e?.name === 'AbortError') throw e;
+        console.warn('IV chunked fetch failed', e);
+      }
+      // de-dup and sort
+      if (pts.length > 0) {
+        const seen = new Set<number>();
+        const dedup: { t:number; v:number }[] = [];
+        for (const p of pts) { if (!seen.has(p.t)) { seen.add(p.t); dedup.push(p); } }
+        dedup.sort((a,b)=>a.t-b.t);
+        this.setCache(cacheKey, dedup);
+        return dedup;
+      }
+    }
+
+    // Try bounded single request per code
+    for (const pc of paramCodes) {
+      try {
+        const url = buildIvUrlFor(pc, { startDT: start.toISOString(), endDT: end.toISOString() });
+        const resp = await fetch(url.toString(), { signal, headers: { Accept: 'application/json' } });
+        if (resp.ok) {
+          const j = await resp.json();
+          const pts = parseIvJson(j);
+          if (pts.length > 0) { this.setCache(cacheKey, pts); return pts; }
+        }
+      } catch (e:any) {
+        if (e?.name === 'AbortError') throw e;
+        // continue to next approach
+      }
+    }
+
+    // Simple period fallback for shorter ranges
+    try {
+      const period = `P${days}D`;
+      for (const pc of paramCodes) {
+        const url2 = buildIvUrlFor(pc, { period });
+        const resp2 = await fetch(url2.toString(), { signal, headers: { Accept: 'application/json' } });
+        if (resp2.ok) {
+          const j2 = await resp2.json();
+          const pts2 = parseIvJson(j2);
+          if (pts2.length > 0) { this.setCache(cacheKey, pts2); return pts2; }
+        }
+      }
+    } catch (e:any) {
+      if (e?.name === 'AbortError') throw e;
+      console.warn('IV period fallback failed', e);
+    }
+
+    return [];
+  }
+
+  async fetchDailyMeansSeries(siteId: string, code: string, start: Date, end: Date, signal?: AbortSignal): Promise<{ t:number; v:number }[]> {
+    const cacheKey = `daily-${siteId}-${code}-${start.toISOString()}-${end.toISOString()}`;
+    const cached = this.getCached<{ t:number; v:number }[]>(cacheKey);
+    if (cached) return cached;
+
+    const ids = this.normalizeIds(siteId);
+    const parseSeries = (feats: any[]) =>
+      feats
+        .map((f: any) => {
+          const pr = f?.properties || {};
+          const ts = pr.time || pr.datetime || pr.result_time;
+          const val = pr.value ?? pr.result;
+          return { t: Date.parse(ts), v: Number(val) };
+        })
+        .filter(d => Number.isFinite(d.t) && Number.isFinite(d.v))
+        .sort((a, b) => a.t - b.t);
+
+    const tryDailyDatetime = async (id: string) => {
+      const dt = `${start.toISOString()}/${end.toISOString()}`;
+      // Attempt 1: daily-values with statistic_id
+      const url1 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+      url1.searchParams.set('monitoring_location_id', id);
+      url1.searchParams.set('parameter_code', code);
+      url1.searchParams.set('statistic_id', '00003');
+      url1.searchParams.set('datetime', dt);
+      url1.searchParams.set('limit', '20000');
+      url1.searchParams.set('f', 'json');
+      console.log('[USGS] daily fetch', { id, code, datetime: dt });
+      try {
+        const feats = await this.fetchPaged(url1.toString(), signal);
+        const p1 = parseSeries(feats);
+        if (p1.length > 0) return p1;
+      } catch (e:any) {
+        if (e?.name === 'AbortError') throw e;
+      }
+      // Attempt 2: daily-values with statistic_code
+      try {
+        const url2 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+        url2.searchParams.set('monitoring_location_id', id);
+        url2.searchParams.set('parameter_code', code);
+        url2.searchParams.set('statistic_code', '00003');
+        url2.searchParams.set('datetime', dt);
+        url2.searchParams.set('limit', '20000');
+        url2.searchParams.set('f', 'json');
+        const feats2 = await this.fetchPaged(url2.toString(), signal);
+        const p2 = parseSeries(feats2);
+        if (p2.length > 0) return p2;
+      } catch (e:any) {
+        if (e?.name === 'AbortError') throw e;
+      }
+      // Attempt 3: daily-values with no statistic filter (let API choose default)
+      try {
+        const url3 = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+        url3.searchParams.set('monitoring_location_id', id);
+        url3.searchParams.set('parameter_code', code);
+        url3.searchParams.set('datetime', dt);
+        url3.searchParams.set('limit', '20000');
+        url3.searchParams.set('f', 'json');
+        const feats3 = await this.fetchPaged(url3.toString(), signal);
+        return parseSeries(feats3);
+      } catch (e:any) {
+        if (e?.name === 'AbortError') throw e;
+        return [] as { t:number; v:number }[];
+      }
+    };
+
+    for (const id of ids) {
+      // 1) Prefer stable NWIS Daily Values (statCd=00003)
+      try {
+        const numeric = id.replace(/^USGS[:\-]?/i, '');
+        const paramCodes = code === '63680' ? ['63680','00076'] : [code];
+        for (const pc of paramCodes) {
+          const dv = new URL('https://waterservices.usgs.gov/nwis/dv/');
+          dv.searchParams.set('format', 'json');
+          dv.searchParams.set('sites', numeric);
+          dv.searchParams.set('parameterCd', pc);
+          dv.searchParams.set('statCd', '00003');
+          dv.searchParams.set('startDT', start.toISOString().slice(0,10));
+          dv.searchParams.set('endDT', end.toISOString().slice(0,10));
+          const resp = await fetch(dv.toString(), { signal, headers: { Accept: 'application/json' } });
+          if (resp.ok) {
+            const j = await resp.json();
+            const tsArr = j?.value?.timeSeries || [];
+            const out: { t:number; v:number }[] = [];
+            for (const ts of tsArr) {
+              const varCode = ts?.variable?.variableCode?.[0]?.value;
+              if (varCode !== pc) continue;
+              const vals = ts?.values || [];
+              for (const block of vals) {
+                const arr = block?.value || [];
+                for (const it of arr) {
+                  const t = Date.parse(it?.dateTime);
+                  const v = Number(it?.value);
+                  if (Number.isFinite(t) && Number.isFinite(v)) out.push({ t, v });
+                }
+              }
+            }
+            out.sort((a,b)=>a.t-b.t);
+            if (out.length > 0) { this.setCache(cacheKey, out); return out; }
+          }
+        }
+      } catch (_) { /* continue */ }
+
+      // 2) OGC daily-values with various statistic params
+      const ogcAttempts: Array<() => Promise<{ t:number; v:number }[]>> = [
+        async () => {
+          const dt = `${start.toISOString()}/${end.toISOString()}`;
+          const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+          url.searchParams.set('monitoring_location_id', id);
+          url.searchParams.set('parameter_code', code);
+          url.searchParams.set('statistic_id', '00003');
+          url.searchParams.set('datetime', dt);
+          url.searchParams.set('limit', '20000');
+          url.searchParams.set('f', 'json');
+          const feats = await this.fetchPaged(url.toString(), signal); return parseSeries(feats);
+        },
+        async () => {
+          const dt = `${start.toISOString()}/${end.toISOString()}`;
+          const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+          url.searchParams.set('monitoring_location_id', id);
+          url.searchParams.set('parameter_code', code);
+          url.searchParams.set('statistic_code', '00003');
+          url.searchParams.set('datetime', dt);
+          url.searchParams.set('limit', '20000');
+          url.searchParams.set('f', 'json');
+          const feats = await this.fetchPaged(url.toString(), signal); return parseSeries(feats);
+        },
+        async () => {
+          const dt = `${start.toISOString()}/${end.toISOString()}`;
+          const url = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily-values/items`));
+          url.searchParams.set('monitoring_location_id', id);
+          url.searchParams.set('parameter_code', code);
+          url.searchParams.set('datetime', dt);
+          url.searchParams.set('limit', '20000');
+          url.searchParams.set('f', 'json');
+          const feats = await this.fetchPaged(url.toString(), signal); return parseSeries(feats);
+        },
+        // Older path fallback
+        async () => {
+          const params = new URLSearchParams({ f: 'json', monitoring_location_id: id, parameter_code: code, statistic_id: '00003', start: start.toISOString(), end: end.toISOString(), limit: '20000' } as any);
+          const u = ensureApiKey(new URL(`${USGS_BASE_URL}/collections/daily/items?${params.toString()}`));
+          try { const feats = await this.fetchPaged(u.toString(), signal); return parseSeries(feats); } catch { return []; }
+        },
+      ];
+
+      for (const attempt of ogcAttempts) {
+        try {
+          const s = await attempt();
+          if (signal?.aborted) return [];
+          if (s.length > 0) { this.setCache(cacheKey, s); return s; }
+        } catch (_) { /* try next */ }
+      }
+    }
+
+    return [];
+  }
+
   async fetchHistoricalData(
     siteId: string, 
     startDate: string, 
@@ -846,7 +1295,7 @@ export class USGSService {
       url.searchParams.set('limit', '1000');
       // API key ensured above
 
-      const response = await fetch(url.toString());
+      const response = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
       if (!response.ok) {
         throw new Error(`USGS API error: ${response.status}`);
       }
